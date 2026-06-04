@@ -126,6 +126,9 @@ const CHARS: &[char] = &[
 
 pub const RENDEZVOUS_SERVERS: &[&str] = &["cloud.gruposgapetro.com.br"];
 pub const RS_PUB_KEY: &str = "biqE0BQhiYvnlMiKo+N1n7DLqKa3pMuzlAUKxWO5CtY=";
+// ConectDesk: server-side connection gate. An incoming control session is only accepted
+// when this API confirms the portal opened a session for this device. Empty = gate disabled.
+pub const CONECTDESK_API: &str = "https://conectdesk.gruposgapetro.com.br:21200";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;

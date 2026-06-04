@@ -2218,6 +2218,53 @@ impl Connection {
         false
     }
 
+    // ConectDesk gate: an incoming control session is only allowed when the ConectDesk portal
+    // has opened a session for this device. Fail-closed (deny if the API can't confirm), so a
+    // technician's own RustDesk — even with the correct server/password — cannot connect
+    // unless the connection was started from the portal.
+    async fn conectdesk_authorized(&self) -> bool {
+        let base = hbb_common::config::CONECTDESK_API;
+        if base.is_empty() {
+            return true; // gate disabled (dev/stock build)
+        }
+        let id = hbb_common::config::Config::get_id();
+        let url = format!(
+            "{}/api/connection/authorized?id={}",
+            base.trim_end_matches('/'),
+            id
+        );
+        let client = match reqwest::Client::builder()
+            .danger_accept_invalid_certs(true) // internal self-signed cert
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("ConectDesk gate: client build failed: {:?}", e);
+                return false;
+            }
+        };
+        match client.get(&url).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    log::error!("ConectDesk gate: HTTP {}", resp.status());
+                    return false;
+                }
+                match resp.json::<serde_json::Value>().await {
+                    Ok(v) => v
+                        .get("authorized")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false),
+                    Err(_) => false,
+                }
+            }
+            Err(e) => {
+                log::error!("ConectDesk gate: request failed: {:?}", e);
+                false
+            }
+        }
+    }
+
     fn is_recent_session(&mut self, tfa: bool) -> bool {
         SESSIONS
             .lock()
@@ -2504,6 +2551,16 @@ impl Connection {
                     self.update_failure(failure, false, 0);
                 }
                 self.send_login_error(err_msg).await;
+                return true;
+            }
+
+            // ===== ConectDesk authorization gate (server-side) =====
+            // Reject any control session that the ConectDesk portal did not start, regardless of
+            // password/recent-session. This is what makes portal/API the ONLY way to connect.
+            if !self.conectdesk_authorized().await {
+                self.send_login_error("Conexao nao autorizada - use o portal ConectDesk")
+                    .await;
+                self.try_start_cm(lr.my_id.clone(), lr.my_name.clone(), false);
                 return true;
             }
 
