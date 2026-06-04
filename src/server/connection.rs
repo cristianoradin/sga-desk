@@ -589,6 +589,7 @@ impl Connection {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         std::thread::spawn(move || Self::handle_input(_rx_input, tx_cloned));
         let mut second_timer = crate::rustdesk_interval(time::interval(Duration::from_secs(1)));
+        let mut gate_tick: u32 = 0; // ConectDesk: re-check authorization periodically
 
         #[cfg(feature = "unix-file-copy-paste")]
         let rx_clip_holder;
@@ -1012,6 +1013,13 @@ impl Connection {
                     #[cfg(windows)]
                     conn.portable_check();
                     raii::AuthedConnID::check_wake_lock_on_setting_changed();
+                    // ConectDesk: every ~15s, drop the session if the portal ended it (Desconectar).
+                    gate_tick = gate_tick.wrapping_add(1);
+                    if conn.authorized && gate_tick % 15 == 0 && conn.conectdesk_should_disconnect().await {
+                        conn.send_close_reason_no_retry("Sessao encerrada no portal ConectDesk").await;
+                        conn.on_close("portal disconnected", true).await;
+                        break;
+                    }
                     if let Some((instant, minute)) = conn.auto_disconnect_timer.as_ref() {
                         if instant.elapsed().as_secs() > minute * 60 {
                             conn.send_close_reason_no_retry("Connection failed due to inactivity").await;
@@ -2284,6 +2292,35 @@ impl Connection {
             .build()
         {
             let _ = client.post(&url).send().await;
+        }
+    }
+
+    // Periodic check WHILE connected: returns true only if the API explicitly says this device is
+    // NOT authorized anymore (portal session ended) → fail-open on errors so a blip won't drop a live session.
+    async fn conectdesk_should_disconnect(&self) -> bool {
+        let base = hbb_common::config::CONECTDESK_API;
+        if base.is_empty() {
+            return false;
+        }
+        let id = hbb_common::config::Config::get_id();
+        let url = format!(
+            "{}/api/connection/authorized?id={}",
+            base.trim_end_matches('/'),
+            id
+        );
+        let Ok(client) = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        else {
+            return false;
+        };
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                Ok(v) => v.get("authorized").and_then(|b| b.as_bool()) == Some(false),
+                Err(_) => false,
+            },
+            _ => false,
         }
     }
 
