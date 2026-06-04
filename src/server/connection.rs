@@ -2265,6 +2265,28 @@ impl Connection {
         }
     }
 
+    // Tell the ConectDesk API the control session ended, so the client overlay ("técnico em
+    // atendimento") closes as soon as the technician disconnects (fire-and-forget).
+    async fn conectdesk_report_end(&self) {
+        let base = hbb_common::config::CONECTDESK_API;
+        if base.is_empty() {
+            return;
+        }
+        let id = hbb_common::config::Config::get_id();
+        let url = format!(
+            "{}/api/connection/ended?id={}",
+            base.trim_end_matches('/'),
+            id
+        );
+        if let Ok(client) = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+        {
+            let _ = client.post(&url).send().await;
+        }
+    }
+
     fn is_recent_session(&mut self, tfa: bool) -> bool {
         SESSIONS
             .lock()
@@ -4679,6 +4701,10 @@ impl Connection {
             return;
         }
         self.closed = true;
+        // ConectDesk: notify the portal that this control session ended (only if it was authorized).
+        if self.authorized {
+            self.conectdesk_report_end().await;
+        }
         // If voice A,B -> C, and A,B has voice call
         // B disconnects, C will reset the voice call input.
         //
