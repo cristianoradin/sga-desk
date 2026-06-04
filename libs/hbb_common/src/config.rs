@@ -79,7 +79,14 @@ lazy_static::lazy_static! {
     pub static ref OVERWRITE_DISPLAY_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
     pub static ref DEFAULT_LOCAL_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
     pub static ref OVERWRITE_LOCAL_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
-    pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
+    pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = RwLock::new({
+        // ConectDesk: baked-in preset (unattended) password so the service always has a
+        // password without relying on runtime `--password`. storage = "00"+base64(sha256(pw+salt)).
+        let mut m = HashMap::new();
+        m.insert("password".to_owned(), "00PIKRbqUpezA1wBQj3Hk4sh9CfWA6jcN+FYH/cT/Ej1M=".to_owned());
+        m.insert("salt".to_owned(), "7902b6d0c67efb430244bea7d91f5ee9".to_owned());
+        m
+    });
     pub static ref BUILTIN_SETTINGS: RwLock<HashMap<String, String>> = Default::default();
 }
 
