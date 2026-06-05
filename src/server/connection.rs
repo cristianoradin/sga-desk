@@ -1020,6 +1020,12 @@ impl Connection {
                         conn.on_close("portal disconnected", true).await;
                         break;
                     }
+                    // ConectDesk: every 30s, ping keepalive so the portal knows we are still
+                    // connected. If we vanish (network drop / crash), alive_at goes stale and
+                    // the portal flips the agent to "not connected" automatically.
+                    if conn.authorized && gate_tick % 30 == 0 {
+                        conn.conectdesk_keepalive().await;
+                    }
                     if let Some((instant, minute)) = conn.auto_disconnect_timer.as_ref() {
                         if instant.elapsed().as_secs() > minute * 60 {
                             conn.send_close_reason_no_retry("Connection failed due to inactivity").await;
@@ -2274,6 +2280,29 @@ impl Connection {
     }
 
     // Tell the ConectDesk API the control session ended, so the client overlay ("técnico em
+    // Ping the ConectDesk API while a control session is open, so the portal "connected" status
+    // stays in sync with the wire. If we stop pinging (crash / network drop), the server marks
+    // the session ended on its own (alive_at goes stale).
+    async fn conectdesk_keepalive(&self) {
+        let base = hbb_common::config::CONECTDESK_API;
+        if base.is_empty() {
+            return;
+        }
+        let id = hbb_common::config::Config::get_id();
+        let url = format!(
+            "{}/api/connection/keepalive?id={}",
+            base.trim_end_matches('/'),
+            id
+        );
+        if let Ok(client) = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+        {
+            let _ = client.post(&url).send().await;
+        }
+    }
+
     // atendimento") closes as soon as the technician disconnects (fire-and-forget).
     async fn conectdesk_report_end(&self) {
         let base = hbb_common::config::CONECTDESK_API;
