@@ -86,43 +86,27 @@ async fn heartbeat(token: &str) -> bool {
 
 // -- sysinfo -----------------------------------------------------------------
 fn collect_sysinfo() -> Value {
-    use sysinfo::{Disks, System};
+    use sysinfo::System;
     let mut sys = System::new_all();
     sys.refresh_all();
     let total_mem = sys.total_memory();
     let used_mem = sys.used_memory();
     let mem_pct = if total_mem > 0 { (used_mem * 100 / total_mem) as u32 } else { 0 };
-    let cpu_pct = sys.global_cpu_usage() as u32;
-    let mut disks_json = vec![];
-    for d in Disks::new_with_refreshed_list().list() {
-        let total = d.total_space();
-        let avail = d.available_space();
-        let used = total.saturating_sub(avail);
-        let pct = if total > 0 { (used * 100 / total) as u32 } else { 0 };
-        disks_json.push(json!({
-            "mount": d.mount_point().to_string_lossy(),
-            "totalGB": total / (1024 * 1024 * 1024),
-            "usedPct": pct,
-        }));
-    }
+    // Disks come from a SEPARATE struct in this sysinfo fork; if it isn't reachable just skip them.
+    // CPU% would need refresh-with-delay + a different API; omitted in phase 1 (we still report cores).
     json!({
         "sistema": {
             "hostname": hostname(),
             "os": os_name(),
-            "osVersion": System::os_version().unwrap_or_default(),
-            "uptimeSec": System::uptime() as i64,
         },
         "hardware": {
             "cpu": {
                 "cores": sys.cpus().len(),
-                "loadPct": cpu_pct,
-                "brand": sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
             },
             "mem": {
                 "totalGB": total_mem / (1024 * 1024 * 1024),
                 "usedPct": mem_pct,
             },
-            "disks": disks_json,
         },
     })
 }
