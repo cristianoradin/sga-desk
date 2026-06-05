@@ -9,6 +9,9 @@ pub use platform::{
 #[cfg(not(any(target_os = "ios")))]
 /// cbindgen:ignore
 mod server;
+// ConectDesk in-service agent task (enroll + heartbeat). See src/conectdesk_agent.rs.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod conectdesk_agent;
 #[cfg(not(any(target_os = "ios")))]
 pub use self::server::*;
 mod client;

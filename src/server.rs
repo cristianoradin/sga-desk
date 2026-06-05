@@ -610,6 +610,9 @@ pub async fn start_server(is_server: bool, no_server: bool) {
         crate::platform::try_kill_broker();
         #[cfg(feature = "hwcodec")]
         scrap::hwcodec::start_check_process();
+        // ConectDesk: in-service agent (enroll + heartbeat). No-op if CONECTDESK_ENROLL_KEY is empty.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        crate::conectdesk_agent::start();
         crate::RendezvousMediator::start_all().await;
     } else {
         match crate::ipc::connect(1000, "").await {

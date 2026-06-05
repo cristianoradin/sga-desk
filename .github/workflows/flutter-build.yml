@@ -163,6 +163,20 @@ jobs:
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
+      - name: Bake ConectDesk enroll key (in-service agent — phase 1)
+        env:
+          CONECTDESK_ENROLL_KEY: ${{ secrets.CONECTDESK_ENROLL_KEY }}
+        run: |
+          if ("$env:CONECTDESK_ENROLL_KEY") {
+            (Get-Content libs/hbb_common/src/config.rs) `
+              -replace 'pub const CONECTDESK_ENROLL_KEY: &str = "";', "pub const CONECTDESK_ENROLL_KEY: &str = `"$env:CONECTDESK_ENROLL_KEY`";" `
+              | Set-Content libs/hbb_common/src/config.rs
+            Write-Host "Enroll key baked."
+          } else {
+            Write-Host "CONECTDESK_ENROLL_KEY secret not set — in-service agent will no-op (Electron keeps running)."
+          }
+        shell: pwsh
+
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
