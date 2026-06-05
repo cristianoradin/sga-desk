@@ -303,25 +303,34 @@ class _ConnectionPageState extends State<ConnectionPage>
 
   @override
   Widget build(BuildContext context) {
-    final isOutgoingOnly = bind.isOutgoingOnly();
-    return Column(
-      children: [
-        Expanded(
-            child: Column(
-          children: [
-            Row(
-              children: [
-                Flexible(child: _buildRemoteIDTextField(context)),
-              ],
-            ).marginOnly(top: 22),
-            SizedBox(height: 12),
-            Divider().paddingOnly(right: 12),
-            Expanded(child: PeerTabPage()),
-          ],
-        ).paddingOnly(left: 12.0)),
-        if (!isOutgoingOnly) const Divider(height: 1),
-        if (!isOutgoingOnly) OnlineStatusWidget()
-      ],
+    // ConectDesk: portal-only viewer. The manual connect field + address book are removed so a
+    // technician cannot dial an arbitrary ID. Connections are opened SOLELY by the portal via the
+    // rustdesk:// handler, which opens the remote window directly (bypassing this home page).
+    const green = Color(0xFF15803D);
+    return Container(
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.lock_outline, size: 56, color: green),
+          const SizedBox(height: 18),
+          const Text('ConectDesk',
+              style:
+                  TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: green)),
+          const SizedBox(height: 10),
+          const Text('Acesso somente pelo portal ConectDesk.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          const Text(
+              'Abra a conexão pelo portal. Este aplicativo não conecta manualmente.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12.5, color: Colors.grey)),
+          const SizedBox(height: 22),
+          OnlineStatusWidget(),
+        ],
+      ),
     );
   }
 
