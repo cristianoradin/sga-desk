@@ -14,7 +14,7 @@ src/version.rs
 *tgz
 cert.pfx
 *.bak
-*svg
+
 *jpg
 sciter.dll
 **pdb
