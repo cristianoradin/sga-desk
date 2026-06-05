@@ -259,7 +259,11 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
+          # ConectDesk: padroniza pasta/exe. Renomeia o binário p/ ConectDesk.exe e passa
+          # --app-name ConectDesk → MSI instala em "C:\Program Files\ConectDesk\ConectDesk.exe",
+          # alinhado com o serviço (APP_NAME=ConectDesk → binPath ConectDesk\ConectDesk.exe).
+          mv ../../rustdesk/rustdesk.exe ../../rustdesk/ConectDesk.exe
+          python preprocess.py --arp --app-name ConectDesk -d ../../rustdesk
           nuget restore msi.sln
           msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
           mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.msi
