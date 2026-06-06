@@ -579,7 +579,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("2FA code must be 6 digits.", "2FA kood peab olema 6 numbrit."),
         ("Multiple Windows sessions found", "Leitud mitu Windowsi seanssi"),
         ("Please select the session you want to connect to", "Palun vali seanss, millega soovid ühendada"),
-        ("powered_by_me", "Põhineb RustDeskil"),
+        ("powered_by_me", "Põhineb ConectDeskil"),
         ("outgoing_only_desk_tip", "See on kohandatud versioon.\nSa saad ühenduda teiste seadmetega, kuid teised seadmed ei saa sinu seadmega ühenduda."),
         ("preset_password_warning", "See kohandatud versioon sisaldab eelmääratud parooli. Igaüks, kes seda parooli teab, võib saada täieliku kontrolli sinu seadme üle. Kui sa ei oodanud seda, desinstalli tarkvara kohe."),
         ("Security Alert", "Turvahoiatus"),

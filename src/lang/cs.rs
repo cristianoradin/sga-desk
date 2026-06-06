@@ -579,7 +579,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("2FA code must be 6 digits.", "Kód 2FA musí mít 6 číslic."),
         ("Multiple Windows sessions found", "Bylo nalezeno více relací Windows"),
         ("Please select the session you want to connect to", "Vyberte relaci, ke které se chcete připojit"),
-        ("powered_by_me", "Poháněno společností RustDesk"),
+        ("powered_by_me", "Poháněno společností ConectDesk"),
         ("outgoing_only_desk_tip", "Toto je přizpůsobená edice.\nMůžete se připojit k jiným zařízením, ale jiná zařízení se k vašemu zařízení připojit nemohou."),
         ("preset_password_warning", "Tato upravená edice je dodávána s přednastaveným heslem. Každý, kdo zná toto heslo, může získat plnou kontrolu nad vaším zařízením. Pokud jste to nečekali, okamžitě software odinstalujte."),
         ("Security Alert", "Bezpečnostní výstraha"),

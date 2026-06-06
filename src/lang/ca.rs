@@ -579,7 +579,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("2FA code must be 6 digits.", "El codi de verificació 2FA haurien de ser almenys 6 dígits"),
         ("Multiple Windows sessions found", "S'han trobat múltiples sessions en ús del Windows"),
         ("Please select the session you want to connect to", "Indiqueu amb quina sessió voleu connectar"),
-        ("powered_by_me", "Amb la tecnologia de RustDesk"),
+        ("powered_by_me", "Amb la tecnologia de ConectDesk"),
         ("outgoing_only_desk_tip", "Aquesta és una versió personalitzada.\nPodeu connectar amb altres dispositius, però no s'accepten connexions d'entrada cap el vostre dispositiu."),
         ("preset_password_warning", "Aquesta versió personalitzada té una contrasenya preestablerta. Qualsevol persona que la conegui pot tenir accés total al vostre dispositiu. Si no és el comportament desitjat, desinstal·leu aquest programa immediatament."),
         ("Security Alert", "Alerta de seguretat"),

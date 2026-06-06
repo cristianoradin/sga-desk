@@ -579,7 +579,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("2FA code must be 6 digits.", "Kode 2FA harus terdiri dari 6 digit."),
         ("Multiple Windows sessions found", "Terdapat beberapa sesi Windows"),
         ("Please select the session you want to connect to", "Silakan pilih sesi yang ingin Anda sambungkan."),
-        ("powered_by_me", "Didukung oleh RustDesk"),
+        ("powered_by_me", "Didukung oleh ConectDesk"),
         ("outgoing_only_desk_tip", "Ini adalah edisi yang sudah kustomisasi.\nAnda dapat terhubung ke perangkat lain, tetapi perangkat lain tidak dapat terhubung ke perangkat Anda."),
         ("preset_password_warning", "Edisi yang dikustomisasi ini dilengkapi dengan kata sandi bawaan. Siapa pun yang mengetahui kata sandi ini dapat memperoleh kontrol penuh atas perangkat Anda. Jika Anda tidak mengharapkan ini, segera hapus pemasangan aplikasi tersebut."),
         ("Security Alert", "Peringatan Keamanan"),

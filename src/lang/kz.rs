@@ -579,7 +579,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("2FA code must be 6 digits.", "2FA коды 6 сан болуы керек."),
         ("Multiple Windows sessions found", "Бірнеше Windows сеші табылды"),
         ("Please select the session you want to connect to", "Қосылғыңыз келетін сешті таңдауды өтінеміз"),
-        ("powered_by_me", "RustDesk негізінде"),
+        ("powered_by_me", "ConectDesk негізінде"),
         ("outgoing_only_desk_tip", "Бұл теңшелген басылым.\nСіз басқа құрылғыларға қосыла аласыз, бірақ басқа құрылғылар сіздің құрылғыңызға қосыла алмайды."),
         ("preset_password_warning", "Бұл теңшелген басылым алдын ала орнатылған құпия сөзбен келеді. Бұл құпия сөзді білетін кез келген адам сіздің құрылғыңызды толық басқара алады. Егер мұны күтпеген болсаңыз, программаны дереу жойыңыз."),
         ("Security Alert", "Қауіпсіздік ескертуі"),

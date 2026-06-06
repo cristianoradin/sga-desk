@@ -579,7 +579,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("2FA code must be 6 digits.", "Koda za dvostopenjsko preverjanje mora imeti 6 znakov."),
         ("Multiple Windows sessions found", "Najdenih je bilo več Windows sej"),
         ("Please select the session you want to connect to", "Izberite sejo, v katero se želite povezati"),
-        ("powered_by_me", "Uporablja tehnologijo RustDesk"),
+        ("powered_by_me", "Uporablja tehnologijo ConectDesk"),
         ("outgoing_only_desk_tip", "To je prilagojena različica.\nLahko se povežete na druge naprave, druge naprave pa se k vam ne morejo povezati."),
         ("preset_password_warning", "Ta prilagojena različica ima prednastavljeno geslo. Kdorkoli, ki pozna to geslo, lahko prevzame popoln nadzor nad vašim računalnikom. Če tega niste pričakovali, takoj odstranite program."),
         ("Security Alert", "Varnostno opozorilo"),
