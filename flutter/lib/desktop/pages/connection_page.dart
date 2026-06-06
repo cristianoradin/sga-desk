@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -301,34 +302,149 @@ class _ConnectionPageState extends State<ConnectionPage>
     }
   }
 
+  // ConectDesk agent home — branded SGA, info about the machine, no manual connect input.
+  // Connections are always initiated by the portal via rustdesk://, which opens the remote
+  // window directly (this page is just informational).
   @override
   Widget build(BuildContext context) {
-    // ConectDesk: portal-only viewer. The manual connect field + address book are removed so a
-    // technician cannot dial an arbitrary ID. Connections are opened SOLELY by the portal via the
-    // rustdesk:// handler, which opens the remote window directly (bypassing this home page).
+    const ink = Color(0xFF0D2B1D);
     const green = Color(0xFF15803D);
+    const greenBright = Color(0xFF1EAE54);
+    const muted = Color(0xFF5D7A6C);
+    const line = Color(0xFFEBF1EE);
     return Container(
-      alignment: Alignment.center,
-      padding: const EdgeInsets.all(32),
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(22, 18, 22, 14),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.lock_outline, size: 56, color: green),
-          const SizedBox(height: 18),
-          const Text('ConectDesk',
-              style:
-                  TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: green)),
-          const SizedBox(height: 10),
-          const Text('Acesso somente pelo portal ConectDesk.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          // Header: brand chip + name + online pill
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(9),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [greenBright, green],
+                  ),
+                ),
+                child: const Icon(Icons.link, color: Colors.white, size: 17),
+              ),
+              const SizedBox(width: 10),
+              const Text('ConectDesk ',
+                  style: TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w800, color: ink)),
+              const Text('Agent',
+                  style: TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w700, color: green)),
+              const Spacer(),
+              OnlineStatusWidget(),
+            ],
+          ),
+          const SizedBox(height: 20),
+          // Hero: SGA logo + name
+          Center(
+            child: Image.asset('assets/icon.png',
+                width: 88,
+                height: 88,
+                errorBuilder: (_, __, ___) => const SizedBox(height: 88)),
+          ),
           const SizedBox(height: 6),
-          const Text(
-              'Abra a conexão pelo portal. Este aplicativo não conecta manualmente.',
+          Center(
+            child: RichText(
+              text: const TextSpan(children: [
+                TextSpan(
+                    text: 'SGA ',
+                    style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                        color: green)),
+                TextSpan(
+                    text: 'Petro',
+                    style: TextStyle(
+                        fontSize: 24, fontWeight: FontWeight.w500, color: green)),
+              ]),
+            ),
+          ),
+          const SizedBox(height: 18),
+          // Info rows
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: line),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Column(
+              children: [
+                _infoRow(Icons.computer, 'Computador',
+                    Platform.localHostname, ink, muted, green),
+                const Divider(height: 1, color: line),
+                FutureBuilder<String>(
+                  future: bind.mainGetMyId(),
+                  builder: (ctx, snap) {
+                    final v = snap.data ?? '';
+                    return _infoRow(
+                        Icons.badge_outlined,
+                        'ID de conexão',
+                        v.isEmpty ? '—' : v,
+                        ink,
+                        muted,
+                        green,
+                        mono: true);
+                  },
+                ),
+                const Divider(height: 1, color: line),
+                _infoRow(Icons.shield_outlined, 'Acesso',
+                    'Somente pelo portal', ink, muted, green),
+              ],
+            ),
+          ),
+          const Spacer(),
+          FutureBuilder<String>(
+            future: bind.mainGetVersion(),
+            builder: (ctx, snap) => Text(
+              'ConectDesk · v${snap.data ?? ''}',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12.5, color: Colors.grey)),
-          const SizedBox(height: 22),
-          OnlineStatusWidget(),
+              style: const TextStyle(fontSize: 11, color: muted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData ic, String label, String value, Color ink, Color muted,
+      Color green,
+      {bool mono = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 13),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F7F5),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(ic, size: 17, color: green),
+          ),
+          const SizedBox(width: 11),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: muted)),
+          const Spacer(),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: ink,
+                  fontFamily: mono ? 'monospace' : null,
+                  letterSpacing: mono ? 0.5 : 0)),
         ],
       ),
     );
