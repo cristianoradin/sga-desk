@@ -119,8 +119,8 @@ fn collect_sysinfo() -> Value {
     let total_mem = sys.total_memory();
     let used_mem = sys.used_memory();
     let mem_pct = if total_mem > 0 { (used_mem * 100 / total_mem) as u32 } else { 0 };
-    let os_version = System::os_version().unwrap_or_default();
-    let uptime = System::uptime();
+    let os_version = sys.os_version().unwrap_or_default();
+    let uptime = sys.uptime();
 
     // Net (first usable interface).
     let (mac, ip4) = first_iface();
