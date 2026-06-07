@@ -86,10 +86,15 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           alignment: Alignment.center,
           child: loadPowered(context),
         ),
+      // ConectDesk: branding por cliente (logo + brand_name vindos da API via cd_brand_*).
+      // Cai pro logo SGA + nome do cliente vinculado, ou pro logo padrão se ainda não enrolou.
       Align(
         alignment: Alignment.center,
-        child: loadLogo(),
+        child: _ConectDeskBranding(),
       ),
+      // ConectDesk: card "Técnico em atendimento" — fica acima do TIP. Aparece só quando
+      // existe sessão técnica autorizada acontecendo agora (gFFI.serverModel.clients).
+      _ConectDeskActiveTechCard(),
       buildTip(context),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
@@ -1145,4 +1150,198 @@ void setPasswordDialog({VoidCallback? notEmptyCallback}) async {
       onCancel: close,
     );
   });
+}
+
+/* =====================================================================
+ * ConectDesk — branding per-cliente + card técnico em atendimento.
+ *
+ * Branding: o agent baixa logo (PNG) e brand_name pelo endpoint
+ * /api/agents/me/branding e guarda em opções:
+ *   cd_brand_logo_path  -> caminho local do PNG (vazio = sem logo custom)
+ *   cd_brand_name       -> texto a mostrar abaixo da logo (vazio = sem texto)
+ *
+ * Card técnico: lê gFFI.serverModel.clients e mostra o primeiro cliente
+ * autorizado que NÃO está disconnected. Reativo via Consumer<ServerModel>.
+ * ===================================================================== */
+
+class _ConectDeskBranding extends StatefulWidget {
+  @override
+  State<_ConectDeskBranding> createState() => _ConectDeskBrandingState();
+}
+
+class _ConectDeskBrandingState extends State<_ConectDeskBranding> {
+  Timer? _poll;
+  String _logoPath = '';
+  String _brandName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    // o sync_branding do agent roda a cada 5min. Re-le as opções a cada 30s
+    // pra UI pegar mudança rapidinho depois de uma atualização.
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _refresh());
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  void _refresh() {
+    final p = bind.mainGetOptionSync(key: 'cd_brand_logo_path');
+    final n = bind.mainGetOptionSync(key: 'cd_brand_name');
+    if (p != _logoPath || n != _brandName) {
+      setState(() {
+        _logoPath = p;
+        _brandName = n;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget logo;
+    if (_logoPath.isNotEmpty && File(_logoPath).existsSync()) {
+      logo = Image.file(File(_logoPath), height: 60, fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => loadLogo());
+    } else {
+      logo = loadLogo();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 180, maxHeight: 60),
+            child: logo,
+          ),
+          if (_brandName.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, left: 8, right: 8),
+              child: Text(
+                _brandName,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).textTheme.titleLarge?.color,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConectDeskActiveTechCard extends StatefulWidget {
+  @override
+  State<_ConectDeskActiveTechCard> createState() =>
+      _ConectDeskActiveTechCardState();
+}
+
+class _ConectDeskActiveTechCardState extends State<_ConectDeskActiveTechCard> {
+  Timer? _tick;
+  Duration _elapsed = Duration.zero;
+  Client? _client;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_client != null && mounted) setState(() => _elapsed += const Duration(seconds: 1));
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  String _format(Duration d) {
+    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final hh = d.inHours;
+    return hh > 0 ? '${hh}h ${mm}m ${ss}s' : '${mm}:${ss}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider.value(
+      value: gFFI.serverModel,
+      child: Consumer<ServerModel>(
+        builder: (context, model, _) {
+          final active = model.clients
+              .where((c) => c.authorized && !c.disconnected)
+              .toList();
+          if (active.isEmpty) {
+            if (_client != null) {
+              _client = null;
+              _elapsed = Duration.zero;
+            }
+            return const Offstage();
+          }
+          final c = active.first;
+          if (_client?.id != c.id) {
+            _client = c;
+            _elapsed = Duration.zero;
+          }
+          final primary = Theme.of(context).colorScheme.primary;
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: primary.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: primary.withOpacity(0.35)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 34, height: 34,
+                  decoration: BoxDecoration(
+                    color: primary.withOpacity(0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.headset_mic, color: primary, size: 18),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        c.name.isNotEmpty ? c.name : 'Técnico',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Theme.of(context).textTheme.titleLarge?.color,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'em atendimento · ${_format(_elapsed)}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
