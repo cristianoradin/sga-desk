@@ -14,6 +14,20 @@
 // All HTTP uses CONECTDESK_API + reqwest with self-signed cert trust. When CONECTDESK_ENROLL_KEY
 // is empty the whole task no-ops (safe for stock/dev builds).
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+// Helper: cria Command sem janela de console flickando no cliente (CREATE_NO_WINDOW = 0x08000000).
+// Aplicado em sc.exe / wmic / ipconfig / tasklist / powershell.exe — todos eram CONSOLE subsystem,
+// então sem essa flag uma janela preta pisca por 100ms a cada execução.
+fn hidden_command(program: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+    cmd
+}
+
 use hbb_common::{
     config::{Config, CONECTDESK_API, CONECTDESK_ENROLL_KEY},
     log, sysinfo, tokio, whoami,
@@ -159,7 +173,7 @@ fn collect_disks() -> Value {
     #[cfg(target_os = "windows")]
     {
         let mut out = vec![];
-        if let Ok(o) = std::process::Command::new("wmic")
+        if let Ok(o) = hidden_command("wmic")
             .args(["logicaldisk", "where", "drivetype=3", "get", "Caption,Size,FreeSpace", "/FORMAT:CSV"])
             .output()
         {
@@ -191,7 +205,7 @@ fn first_iface() -> (String, String) {
     // ipconfig /all → procura primeira interface ativa com MAC + IPv4.
     let mut mac = String::new();
     let mut ip4 = String::new();
-    if let Ok(o) = std::process::Command::new("ipconfig").arg("/all").output() {
+    if let Ok(o) = hidden_command("ipconfig").arg("/all").output() {
         let s = String::from_utf8_lossy(&o.stdout);
         for line in s.lines() {
             let l = line.trim();
@@ -291,7 +305,7 @@ fn probe_serial(cfg: &Value) -> (String, Option<u32>) {
     let com = cfg.get("com").and_then(|v| v.as_str()).unwrap_or("");
     if com.is_empty() { return ("down".to_string(), None); }
     // Just check if the port exists via wmic. Bytes-trafegando vai numa próxima rev.
-    if let Ok(o) = std::process::Command::new("wmic")
+    if let Ok(o) = hidden_command("wmic")
         .args(["path", "Win32_SerialPort", "get", "DeviceID"])
         .output()
     {
@@ -334,14 +348,14 @@ async fn run_watchdog(token: &str) {
 #[cfg(target_os = "windows")]
 fn check_alive(kind: &str, name: &str) -> bool {
     if kind == "service" {
-        if let Ok(o) = std::process::Command::new("sc.exe").args(["query", name]).output() {
+        if let Ok(o) = hidden_command("sc.exe").args(["query", name]).output() {
             let s = String::from_utf8_lossy(&o.stdout);
             return s.contains("RUNNING");
         }
         return false;
     }
     if kind == "process" {
-        if let Ok(o) = std::process::Command::new("tasklist").args(["/NH", "/FI", &format!("IMAGENAME eq {}", name)]).output() {
+        if let Ok(o) = hidden_command("tasklist").args(["/NH", "/FI", &format!("IMAGENAME eq {}", name)]).output() {
             let s = String::from_utf8_lossy(&o.stdout);
             return s.to_lowercase().contains(&name.to_lowercase());
         }
@@ -355,10 +369,10 @@ fn check_alive(_kind: &str, _name: &str) -> bool { true }
 fn attempt_restart(kind: &str, name: &str, exec_path: &str) {
     if kind == "service" {
         log::info!("ConectDesk watchdog: restart service {}", name);
-        let _ = std::process::Command::new("sc.exe").args(["start", name]).status();
+        let _ = hidden_command("sc.exe").args(["start", name]).status();
     } else if kind == "process" && !exec_path.is_empty() {
         log::info!("ConectDesk watchdog: relaunch {}", exec_path);
-        let _ = std::process::Command::new(exec_path).spawn();
+        let _ = hidden_command(exec_path).spawn();
     }
 }
 #[cfg(not(target_os = "windows"))]
@@ -431,7 +445,7 @@ async fn maybe_update() {
         tmp.display()
     );
     log::info!("ConectDesk update: launching detached installer for build {}", remote_build);
-    let _ = std::process::Command::new("powershell.exe")
+    let _ = hidden_command("powershell.exe")
         .args(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
         .spawn();
 }
@@ -503,7 +517,7 @@ async fn sync_branding(token: &str) {
 #[cfg(target_os = "windows")]
 fn migrate_stock_service() {
     let has = |name: &str| -> bool {
-        std::process::Command::new("sc.exe")
+        hidden_command("sc.exe")
             .args(&["query", name])
             .output()
             .map(|o| o.status.success())
@@ -511,9 +525,9 @@ fn migrate_stock_service() {
     };
     if !has("ConectDesk") || !has("RustDesk") { return; }
     log::info!("ConectDesk: legacy RustDesk service detected, removing");
-    let _ = std::process::Command::new("sc.exe").args(&["stop", "RustDesk"]).status();
+    let _ = hidden_command("sc.exe").args(&["stop", "RustDesk"]).status();
     std::thread::sleep(Duration::from_secs(2));
-    let _ = std::process::Command::new("sc.exe").args(&["delete", "RustDesk"]).status();
+    let _ = hidden_command("sc.exe").args(&["delete", "RustDesk"]).status();
 }
 
 #[cfg(not(target_os = "windows"))]
