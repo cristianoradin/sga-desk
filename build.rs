@@ -90,5 +90,13 @@ fn main() {
         build_mac();
         println!("cargo:rustc-link-lib=framework=ApplicationServices");
     }
+    // ConectDesk: bake a build id (Unix seconds since epoch) into the binary so the in-service
+    // agent can compare its build against the feed's `build_id` and self-update without depending
+    // on Cargo.toml semver bumps.
+    let build_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    println!("cargo:rustc-env=CONECTDESK_BUILD_ID={}", build_id);
     println!("cargo:rerun-if-changed=build.rs");
 }

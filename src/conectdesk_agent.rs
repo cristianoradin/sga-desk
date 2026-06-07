@@ -361,76 +361,113 @@ fn attempt_restart(kind: &str, name: &str, exec_path: &str) {
 fn attempt_restart(_kind: &str, _name: &str, _exec_path: &str) {}
 
 // -- auto-update -------------------------------------------------------------
-fn version_gt(a: &str, b: &str) -> bool {
-    let pa: Vec<u32> = a.split('.').map(|n| n.parse().unwrap_or(0)).collect();
-    let pb: Vec<u32> = b.split('.').map(|n| n.parse().unwrap_or(0)).collect();
-    let n = pa.len().max(pb.len());
-    for i in 0..n {
-        let x = pa.get(i).copied().unwrap_or(0);
-        let y = pb.get(i).copied().unwrap_or(0);
-        if x != y { return x > y; }
-    }
-    false
+// Build id baked at compile time. Compared against the feed's `build_id` (also Unix seconds)
+// so the in-service agent self-updates without depending on Cargo.toml semver bumps.
+fn local_build_id() -> u64 {
+    env!("CONECTDESK_BUILD_ID").parse::<u64>().unwrap_or(0)
 }
 
-fn parse_latest_yml(s: &str) -> Option<(String, String)> {
-    let mut version = None;
-    let mut path = None;
+// fork-latest.yml format (separate from electron's latest.yml):
+//   build_id: 1780797000
+//   version: 1.4.7-cd-20260607
+//   exe: ConectDesk-Setup.exe
+//   sha512: <hex>   (optional — when present, fork verifies after download)
+fn parse_fork_feed(s: &str) -> Option<(u64, String, String, Option<String>)> {
+    let mut build_id = None;
+    let mut version = String::new();
+    let mut exe = None;
+    let mut sha512 = None;
     for line in s.lines() {
         let l = line.trim();
-        if let Some(v) = l.strip_prefix("version:") {
-            version = Some(v.trim().trim_matches('\'').trim_matches('"').to_string());
-        } else if let Some(v) = l.strip_prefix("path:") {
-            path = Some(v.trim().trim_matches('\'').trim_matches('"').to_string());
-        } else if path.is_none() {
-            if let Some(v) = l.strip_prefix("- url:") {
-                path = Some(v.trim().trim_matches('\'').trim_matches('"').to_string());
-            } else if let Some(v) = l.strip_prefix("url:") {
-                path = Some(v.trim().trim_matches('\'').trim_matches('"').to_string());
-            }
+        if let Some(v) = l.strip_prefix("build_id:") {
+            build_id = v.trim().trim_matches('\'').trim_matches('"').parse::<u64>().ok();
+        } else if let Some(v) = l.strip_prefix("version:") {
+            version = v.trim().trim_matches('\'').trim_matches('"').to_string();
+        } else if let Some(v) = l.strip_prefix("exe:") {
+            exe = Some(v.trim().trim_matches('\'').trim_matches('"').to_string());
+        } else if let Some(v) = l.strip_prefix("sha512:") {
+            let s = v.trim().trim_matches('\'').trim_matches('"').to_string();
+            if !s.is_empty() { sha512 = Some(s); }
         }
     }
-    Some((version?, path?))
+    Some((build_id?, version, exe?, sha512))
 }
 
 #[cfg(target_os = "windows")]
 async fn maybe_update() {
     let Some(base) = api_base() else { return };
-    let Some(client) = http_client(20) else { return };
-    let url = format!("{}/updates/latest.yml", base);
+    let Some(client) = http_client(30) else { return };
+    let url = format!("{}/updates/fork-latest.yml", base);
     let body = match client.get(&url).send().await {
         Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
         _ => return,
     };
-    let Some((latest, path)) = parse_latest_yml(&body) else { return };
-    if !version_gt(&latest, agent_version()) { return; }
-    log::info!("ConectDesk update: {} -> {} (downloading {})", agent_version(), latest, path);
-    let url_safe = path.replace(' ', "%20");
+    let Some((remote_build, remote_version, exe, _sha512)) = parse_fork_feed(&body) else { return };
+    let local = local_build_id();
+    if remote_build <= local {
+        log::debug!("ConectDesk update: up-to-date (local={}, remote={})", local, remote_build);
+        return;
+    }
+    log::info!("ConectDesk update: {} -> {} (downloading {})", local, remote_version, exe);
+    let url_safe = exe.replace(' ', "%20");
     let dl_url = format!("{}/updates/{}", base, url_safe);
     let bytes = match client.get(&dl_url).send().await {
         Ok(r) if r.status().is_success() => match r.bytes().await { Ok(b) => b, Err(_) => return },
-        _ => return,
+        _ => { log::warn!("ConectDesk update: download failed"); return; }
     };
-    let tmp = std::env::temp_dir().join(format!("ConectDesk-Update-{}.exe", latest));
+    let tmp = std::env::temp_dir().join(format!("ConectDesk-Update-{}.exe", remote_build));
     if std::fs::write(&tmp, &bytes).is_err() {
         log::error!("ConectDesk update: failed to write {:?}", tmp);
         return;
     }
-    log::info!("ConectDesk update: launching {} /S", tmp.display());
-    let _ = std::process::Command::new(&tmp).arg("/S").spawn();
+    // Detached PowerShell: stop service, install silent, restart. The current process gets killed
+    // mid-install when the service stops — that's expected. The detached child survives and finishes.
+    let ps = format!(
+        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"Stop-Service ConectDesk -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; & '{}' /S; Start-Sleep -Seconds 8; Start-Service ConectDesk -ErrorAction SilentlyContinue\"",
+        tmp.display()
+    );
+    log::info!("ConectDesk update: launching detached installer for build {}", remote_build);
+    let _ = std::process::Command::new("powershell.exe")
+        .args(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps])
+        .spawn();
 }
 
 #[cfg(not(target_os = "windows"))]
 async fn maybe_update() {}
 
+// Clean up the legacy "RustDesk" service if it co-exists with our gated "ConectDesk" service.
+// Run once on agent start. The fork runs as SYSTEM, so `sc.exe delete` works without UAC.
+#[cfg(target_os = "windows")]
+fn migrate_stock_service() {
+    let has = |name: &str| -> bool {
+        std::process::Command::new("sc.exe")
+            .args(&["query", name])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    if !has("ConectDesk") || !has("RustDesk") { return; }
+    log::info!("ConectDesk: legacy RustDesk service detected, removing");
+    let _ = std::process::Command::new("sc.exe").args(&["stop", "RustDesk"]).status();
+    std::thread::sleep(Duration::from_secs(2));
+    let _ = std::process::Command::new("sc.exe").args(&["delete", "RustDesk"]).status();
+}
+
+#[cfg(not(target_os = "windows"))]
+fn migrate_stock_service() {}
+
 // -- main loop ---------------------------------------------------------------
 pub fn start() {
     tokio::spawn(async move {
         log::info!(
-            "ConectDesk in-service agent: starting (api={}, enroll_key_set={})",
+            "ConectDesk in-service agent: starting (api={}, enroll_key_set={}, build_id={})",
             CONECTDESK_API,
             !CONECTDESK_ENROLL_KEY.is_empty(),
+            local_build_id(),
         );
+        // One-shot cleanup of the legacy RustDesk service if it co-exists with our ConectDesk service.
+        // SYSTEM context — no UAC needed.
+        migrate_stock_service();
         tokio::time::sleep(Duration::from_secs(15)).await;
         let mut tick: u64 = 0;
         loop {
