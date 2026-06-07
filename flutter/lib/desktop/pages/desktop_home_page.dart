@@ -60,14 +60,16 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget build(BuildContext context) {
     super.build(context);
     final isIncomingOnly = bind.isIncomingOnly();
+    // ConectDesk: sidebar esquerda removida. ID/Senha/branding viviam ali, mas a tela
+    // do meio (ConnectionPage) já mostra tudo isso. Aliviamos o ruído visual.
+    if (!isIncomingOnly) {
+      return _buildBlock(child: buildRightPane(context));
+    }
+    // Fallback: modo incoming-only (sem ConnectionPage) ainda precisa da sidebar pra mostrar ID.
     return _buildBlock(
         child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        buildLeftPane(context),
-        if (!isIncomingOnly) const VerticalDivider(width: 1),
-        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),
-      ],
+      children: [buildLeftPane(context)],
     ));
   }
 

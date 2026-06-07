@@ -79,64 +79,56 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
               .marginOnly(left: em),
         );
 
-    setupServerWidget() => Flexible(
-          child: Offstage(
-            offstage: !(!_svcStopped.value &&
-                stateGlobal.svcStatus.value == SvcStatus.ready &&
-                _svcIsUsingPublicServer.value),
+    // ConectDesk: o tip "Para uma conexão mais rápida, por favor configure seu próprio servidor"
+    // some sempre — o portal já faz o papel desse tip, não confunde o cliente final.
+    setupServerWidget() => SizedBox.shrink();
+
+    // ConectDesk: chip Online/Offline em pílula com fundo suave (verde/vermelho/âmbar).
+    // Substitui o ponto + texto solto antigo. Sinaliza o status do acesso remoto à distância.
+    basicWidget() {
+      final isWarn = _svcStopped.value || stateGlobal.svcStatus.value == SvcStatus.connecting;
+      final isReady = stateGlobal.svcStatus.value == SvcStatus.ready && !_svcStopped.value;
+      final color = isWarn
+          ? kColorWarn
+          : (isReady ? const Color(0xFF01A862) : const Color(0xFFE04F5F));
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: color.withOpacity(0.35)),
+            ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(', ', style: TextStyle(fontSize: em)),
-                Flexible(
-                  child: InkWell(
-                    onTap: onUsePublicServerGuide,
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            translate('setup_server_tip'),
-                            style: TextStyle(
-                                decoration: TextDecoration.underline,
-                                fontSize: em),
-                          ),
-                        ),
-                      ],
-                    ),
+                Container(
+                  height: 9, width: 9,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(99),
+                    boxShadow: [BoxShadow(color: color.withOpacity(0.45), blurRadius: 6)],
                   ),
-                )
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  isReady ? 'Online' : (isWarn ? translate('connecting_status') : 'Offline'),
+                  style: TextStyle(
+                    fontSize: em,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
               ],
             ),
-          ),
-        );
-
-    basicWidget() => Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              height: 8,
-              width: 8,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(4),
-                color: _svcStopped.value ||
-                        stateGlobal.svcStatus.value == SvcStatus.connecting
-                    ? kColorWarn
-                    : (stateGlobal.svcStatus.value == SvcStatus.ready
-                        ? Color.fromARGB(255, 50, 190, 166)
-                        : Color.fromARGB(255, 224, 79, 95)),
-              ),
-            ).marginSymmetric(horizontal: em),
-            Container(
-              width: isIncomingOnly ? 226 : null,
-              child: _buildConnStatusMsg(),
-            ),
-            // stop
-            if (!isIncomingOnly) startServiceWidget(),
-            // ready && public
-            // No need to show the guide if is custom client.
-            if (!isIncomingOnly) setupServerWidget(),
-          ],
-        );
+          ).marginSymmetric(horizontal: em / 2),
+          if (!isIncomingOnly) startServiceWidget(),
+          if (!isIncomingOnly) setupServerWidget(),
+        ],
+      );
+    }
 
     return Container(
       height: height,
