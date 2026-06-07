@@ -22,9 +22,13 @@ use serde_json::{json, Value};
 use std::time::Duration;
 
 const TOKEN_KEY: &str = "conectdesk_token";
+const BRANDING_TS_KEY: &str = "cd_logo_updated_at";
+const BRAND_NAME_KEY: &str = "cd_brand_name";
+const BRAND_LOGO_PATH_KEY: &str = "cd_brand_logo_path";
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const SYSINFO_INTERVAL_SECS: u64 = 600;     // 10 min
 const UPDATE_INTERVAL_SECS: u64 = 1800;     // 30 min
+const BRANDING_INTERVAL_SECS: u64 = 300;    // 5 min
 const PROBE_INTERVAL_SECS: u64 = 60;        // bombas + watchdog
 const ENROLL_RETRY_SECS: u64 = 60;
 
@@ -435,6 +439,65 @@ async fn maybe_update() {
 #[cfg(not(target_os = "windows"))]
 async fn maybe_update() {}
 
+// Synchronize per-client branding (logo + brand_name) from the API.
+// Saves the PNG to %LOCALAPPDATA%\ConectDesk\branding.png (or ~/.config on Linux) and writes
+// cd_brand_name + cd_brand_logo_path into Config so the CM (Flutter UI) can render them.
+// Skips download when logo_updated_at hasn't moved.
+async fn sync_branding(token: &str) {
+    let Some(base) = api_base() else { return };
+    let Some(client) = http_client(15) else { return };
+    let url = format!("{}/api/agents/me/branding", base);
+    let resp = match client.get(&url).bearer_auth(token).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return,
+    };
+    let v: Value = match resp.json().await { Ok(v) => v, Err(_) => return };
+    let brand_name = v.get("brandName").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let logo_url = v.get("logoUrl").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let updated_at = v.get("logoUpdatedAt").and_then(|x| x.as_u64()).unwrap_or(0);
+
+    // Always sync brand_name (cheap string write).
+    Config::set_option(BRAND_NAME_KEY.to_string(), brand_name.clone());
+
+    // No logo configured → clear the local cached path (CM falls back to SGA default).
+    if logo_url.is_empty() || updated_at == 0 {
+        Config::set_option(BRAND_LOGO_PATH_KEY.to_string(), String::new());
+        Config::set_option(BRANDING_TS_KEY.to_string(), "0".to_string());
+        return;
+    }
+
+    // Skip download when the timestamp hasn't advanced.
+    let local_ts: u64 = Config::get_option(BRANDING_TS_KEY).parse().unwrap_or(0);
+    let local_path = Config::get_option(BRAND_LOGO_PATH_KEY);
+    if local_ts == updated_at && !local_path.is_empty() && std::path::Path::new(&local_path).exists() {
+        return;
+    }
+
+    let full_url = if logo_url.starts_with("http") { logo_url } else { format!("{}{}", base, logo_url) };
+    let bytes = match client.get(&full_url).send().await {
+        Ok(r) if r.status().is_success() => match r.bytes().await { Ok(b) => b, Err(_) => return },
+        _ => return,
+    };
+
+    // %LOCALAPPDATA%\ConectDesk on Windows, $XDG_CONFIG_HOME/ConectDesk or ~/.config/ConectDesk
+    // on Linux, fallback to %TEMP%\ConectDesk. Avoid the extra `dirs` crate dependency.
+    let base_dir = if cfg!(target_os = "windows") {
+        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+    };
+    let dir = base_dir
+        .map(|d| d.join("ConectDesk"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ConectDesk"));
+    if std::fs::create_dir_all(&dir).is_err() { return; }
+    let path = dir.join("branding.png");
+    if std::fs::write(&path, &bytes).is_err() { return; }
+    Config::set_option(BRAND_LOGO_PATH_KEY.to_string(), path.to_string_lossy().to_string());
+    Config::set_option(BRANDING_TS_KEY.to_string(), updated_at.to_string());
+    log::info!("ConectDesk branding: sync ok ({} bytes, updated_at={})", bytes.len(), updated_at);
+}
+
 // Clean up the legacy "RustDesk" service if it co-exists with our gated "ConectDesk" service.
 // Run once on agent start. The fork runs as SYSTEM, so `sc.exe delete` works without UAC.
 #[cfg(target_os = "windows")]
@@ -507,6 +570,10 @@ pub fn start() {
             // Update.
             if tick * HEARTBEAT_INTERVAL_SECS % UPDATE_INTERVAL_SECS == 0 {
                 maybe_update().await;
+            }
+            // Branding (logo + nome empresa do cliente) a cada 5min.
+            if tick * HEARTBEAT_INTERVAL_SECS % BRANDING_INTERVAL_SECS == 0 {
+                sync_branding(&token).await;
             }
             // Watchdog + Bombas a cada 60s (=2 ticks).
             if tick * HEARTBEAT_INTERVAL_SECS % PROBE_INTERVAL_SECS == 0 {
