@@ -261,17 +261,19 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return InkWell(
       onTap: DesktopTabPage.onAddSetting,
       child: Tooltip(
-        message: translate('Settings'),
+        message: translate('Configurações'),
         child: Obx(
           () => CircleAvatar(
             radius: 15,
             backgroundColor: hover.value
                 ? Theme.of(context).scaffoldBackgroundColor
                 : Theme.of(context).colorScheme.background,
+            // ConectDesk: troca Icons.more_vert (3 pontinhos genéricos) por engrenagem
+            // pra o usuário achar configurações sem precisar de tutorial.
             child: Icon(
-              Icons.more_vert_outlined,
+              Icons.settings,
               size: 20,
-              color: hover.value ? textColor : textColor?.withOpacity(0.5),
+              color: hover.value ? textColor : textColor?.withOpacity(0.7),
             ),
           ),
         ),
