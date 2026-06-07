@@ -394,7 +394,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("One-time Password", "Senha de uso único"),
         ("Use one-time password", "Usar senha de uso único"),
         ("One-time password length", "Comprimento da senha de uso único"),
-        ("Request access to your device", "Solicitar acesso ao seu dispositivo"),
+        ("Request access to your device", "Solicita acesso pelo ConectDesk · libere para iniciar o atendimento"),
         ("Hide connection management window", "Ocultar janela de gerenciamento de conexão"),
         ("hide_cm_tip", "Permitir ocultação somente se aceitar sessões via senha e usar senha permanente"),
         ("wayland_experiment_tip", "O suporte ao Wayland está em estágio experimental, use o X11 se precisar de acesso autônomo."),

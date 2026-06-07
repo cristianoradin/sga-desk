@@ -578,20 +578,30 @@ class _CmHeaderState extends State<_CmHeader>
   }
 
   Widget _buildInitialAvatar() {
+    // ConectDesk: substitui o quadrado roxo (str2color(client.name)) por um avatar
+    // branco com a inicial em verde. Combina com o gradient verde do card e remove
+    // cores aleatórias que destoam do branding.
     return Container(
       width: 70,
       height: 70,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: str2color(client.name),
+        color: Colors.white.withOpacity(0.92),
         borderRadius: BorderRadius.circular(15.0),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Text(
-        client.name.isNotEmpty ? client.name[0] : '?',
-        style: TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-          fontSize: 55,
+        client.name.isNotEmpty ? client.name[0].toUpperCase() : '?',
+        style: const TextStyle(
+          fontWeight: FontWeight.w800,
+          color: Color(0xff01A862), // ConectDesk accent
+          fontSize: 50,
         ),
       ),
     );
