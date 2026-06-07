@@ -8,7 +8,10 @@ fn main() {
                 winapi::um::winnt::LANG_ENGLISH,
                 winapi::um::winnt::SUBLANG_ENGLISH_US,
             ))
-            .set_manifest_file("../../res/manifest.xml");
+            // ConectDesk: manifest separado pra forçar UAC no portable-packer
+            // (ConectDesk-Install.exe). Sem requireAdministrator o auto-install do
+            // serviço Windows falhava silenciosamente — user achava que "não fez nada".
+            .set_manifest_file("res/manifest.xml");
         match res.compile() {
             Err(e) => {
                 write!(std::io::stderr(), "{}", e).unwrap();
