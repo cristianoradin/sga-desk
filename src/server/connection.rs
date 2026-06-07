@@ -2646,7 +2646,7 @@ impl Connection {
             // Reject any control session that the ConectDesk portal did not start, regardless of
             // password/recent-session. This is what makes portal/API the ONLY way to connect.
             if !self.conectdesk_authorized().await {
-                self.send_login_error("Conexao nao autorizada - use o portal ConectDesk")
+                self.send_login_error("Sessao encerrada. Para conectar novamente, abra o portal ConectDesk e clique em Conectar.")
                     .await;
                 self.try_start_cm(lr.my_id.clone(), lr.my_name.clone(), false);
                 return true;
