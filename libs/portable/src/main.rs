@@ -202,7 +202,11 @@ fn main() {
         &mut ui,
     ) {
         if click_setup {
-            args = vec!["--install".to_owned()];
+            // ConectDesk: --silent-install em vez de --install. O --install abria o setup
+            // wizard onde o usuário precisava clicar OK → instalar. O --silent-install copia
+            // pro Program Files E registra o serviço Windows direto (combinado com
+            // requireAdministrator no manifest, vira: duplo clique → UAC → serviço rodando).
+            args = vec!["--silent-install".to_owned()];
         } else if quick_support {
             args = vec!["--quick_support".to_owned()];
         }
