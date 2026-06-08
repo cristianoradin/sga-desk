@@ -736,11 +736,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
-    // ConectDesk: dispara widget canto sempre on-top no boot. Falha-soft se sub-window
-    // não puder ser criada (algumas plataformas / restrições headless).
-    Future.delayed(const Duration(milliseconds: 800), () async {
-      try { await rustDeskWinManager.showCdWidget(); } catch (_) {}
-    });
+    // ConectDesk: widget canto DESABILITADO temporariamente — spawn da sub-window no boot
+    // estava criando uma janela branca extra e atrapalhando a conexão da janela principal
+    // (ensureInitialized numa sub-window conflita com o main window manager). Re-ativar só
+    // depois de isolar num WindowType próprio que não toque no windowManager singleton.
+    // Future.delayed(const Duration(milliseconds: 800), () async {
+    //   try { await rustDeskWinManager.showCdWidget(); } catch (_) {}
+    // });
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();
