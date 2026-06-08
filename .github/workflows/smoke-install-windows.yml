@@ -49,21 +49,31 @@ jobs:
         id: locate
         shell: pwsh
         run: |
-          $exe = Get-ChildItem -Path artifact -Filter "rustdesk-*-x86_64.exe" -Recurse | Select-Object -First 1
-          if (-not $exe) { throw "Installer .exe não encontrado no artefato" }
-          Write-Host "Installer: $($exe.FullName) ($([math]::Round($exe.Length/1MB,1)) MB)"
-          "installer=$($exe.FullName)" | Out-File -Append $env:GITHUB_OUTPUT
+          $msi = Get-ChildItem -Path artifact -Filter "rustdesk-*-x86_64.msi" -Recurse | Select-Object -First 1
+          if (-not $msi) { throw "Installer .msi não encontrado no artefato" }
+          Write-Host "Installer MSI: $($msi.FullName) ($([math]::Round($msi.Length/1MB,1)) MB)"
+          "installer=$($msi.FullName)" | Out-File -Append $env:GITHUB_OUTPUT
 
-      - name: Run installer (silent)
+      - name: Run MSI install
         shell: pwsh
         run: |
-          $exe = "${{ steps.locate.outputs.installer }}"
-          Write-Host "Executando: $exe"
-          # Install.exe é o portable-packer com manifest requireAdministrator. Em CI o runner
-          # já roda como administrador, então UAC é auto-aceito. Spawn detached pra não bloquear.
-          $p = Start-Process -FilePath $exe -PassThru
-          Write-Host "Installer PID: $($p.Id) — aguardando 90s pra completar setup + register service"
-          Start-Sleep -Seconds 90
+          $msi = "${{ steps.locate.outputs.installer }}"
+          # MSI install via msiexec /quiet roda no contexto admin do runner CI sem precisar
+          # de elevation UI (não envolve manifest requireAdministrator/UAC consent prompt).
+          # Saída do msiexec é capturada via log file pra debugging.
+          $log = "$env:TEMP\msi-install.log"
+          Write-Host "msiexec /i $msi /quiet /norestart /l*v $log"
+          $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", "`"$msi`"", "/quiet", "/norestart", "/l*v", "`"$log`"") -PassThru -Wait
+          Write-Host "msiexec exit code: $($proc.ExitCode)"
+          if (Test-Path $log) {
+            Write-Host "=== MSI log (últimas 40 linhas) ==="
+            Get-Content $log -Tail 40
+          }
+          if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+            throw "MSI install falhou com exit code $($proc.ExitCode)"
+          }
+          Write-Host "Aguardando 20s pra service registrar + boot"
+          Start-Sleep -Seconds 20
 
       - name: Validate installation
         shell: pwsh
