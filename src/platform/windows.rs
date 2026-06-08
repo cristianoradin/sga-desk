@@ -1653,6 +1653,13 @@ if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} 
     );
     let src_exe = std::env::current_exe()?.to_str().unwrap_or("").to_string();
 
+    // ConectDesk: limpa o flag stop-service em config persisted ANTES de gerar os cmds.
+    // Sem isso, install fresh em máquina que rodou Electron antigo (que setava stop-service=Y
+    // ao desinstalar) caía no branch "sem create_service" do get_create_service — pasta
+    // ficava criada mas o serviço Windows nunca era registrado, e o usuário via "FALHA 1060
+    // — O serviço especificado não existe".
+    Config::set_option("stop-service".into(), "".into());
+
     // potential bug here: if run_cmd cancelled, but config file is changed.
     if let Some(lic) = get_license() {
         Config::set_option("key".into(), lic.key);
