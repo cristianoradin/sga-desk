@@ -11,6 +11,7 @@ import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
+import 'package:flutter_hbb/desktop/pages/cd_session_history_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -190,7 +191,36 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   buildRightPane(BuildContext context) {
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: ConnectionPage(),
+      child: Stack(
+        children: [
+          ConnectionPage(),
+          // ConectDesk: FAB pequeno canto inferior direito → abre histórico das sessões.
+          // Dados vêm de cd_session_history option (sync a cada 5min pelo agent).
+          Positioned(
+            right: 16, bottom: 16,
+            child: Material(
+              color: const Color(0xff01A862),
+              shape: const CircleBorder(),
+              elevation: 4,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const CdSessionHistoryPage(),
+                  ));
+                },
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Tooltip(
+                    message: 'Histórico de sessões',
+                    child: Icon(Icons.history, color: Colors.white, size: 22),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

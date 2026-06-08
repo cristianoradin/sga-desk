@@ -309,6 +309,12 @@ void runCdWidgetWindow() async {
   final ctrl = WindowController.fromWindowId(kWindowId!);
   try { await ctrl.setFrame(const Rect.fromLTWH(0, 0, 320, 140)); } catch (_) {}
   try { await ctrl.setTitle('ConectDesk'); } catch (_) {}
+  // alwaysOnTop fica TRUE pra widget hover sobre janelas normais; ainda perde pra apps
+  // em fullscreen exclusivo (jogos/players DirectX) — limitação OS, não dá pra contornar
+  // sem hook nativo. setHasShadow(false) reduz flicker quando o widget é arrastado.
+  try { await ctrl.setAlwaysOnTop(true); } catch (_) {}
+  try { await ctrl.setSkipTaskbar(true); } catch (_) {}
+  try { await ctrl.setHasShadow(false); } catch (_) {}
   // Posiciona canto inferior direito da tela primária.
   try {
     final screens = await window_size.getScreenList();

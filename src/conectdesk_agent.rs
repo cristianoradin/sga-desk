@@ -44,6 +44,10 @@ const BRAND_LOGO_PATH_KEY: &str = "cd_brand_logo_path";
 const ACTIVE_SESSION_ID_KEY: &str = "cd_active_session_id";
 const ACTIVE_SESSION_TECH_NAME_KEY: &str = "cd_active_session_tech_name";
 const ACTIVE_SESSION_TECH_PHOTO_PATH_KEY: &str = "cd_active_session_tech_photo_path";
+// Histórico de sessões — JSON array salvo em option pra Flutter ler sem HTTP. Refresh
+// a cada SESSION_HISTORY_INTERVAL_SECS via sync_session_history().
+const SESSION_HISTORY_KEY: &str = "cd_session_history";
+const SESSION_HISTORY_INTERVAL_SECS: u64 = 300; // 5 min
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const SYSINFO_INTERVAL_SECS: u64 = 600;     // 10 min
 const UPDATE_INTERVAL_SECS: u64 = 1800;     // 30 min
@@ -573,6 +577,37 @@ fn clear_active_session() {
     Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), String::new());
 }
 
+// Histórico de sessões — GET /api/agents/me/sessions retorna últimas 50 sessões.
+// Salvamos em option como JSON minificado pra Flutter UI consumir via mainGetOption.
+// Mantemos só campos pequenos (id, técnico, started_at, ended_at, reason) — sem
+// technician_photo (esse é base64 e estoura option grande).
+async fn sync_session_history(token: &str) {
+    let Some(base) = api_base() else { return };
+    let Some(client) = http_client(15) else { return };
+    let url = format!("{}/api/agents/me/sessions", base);
+    let resp = match client.get(&url).bearer_auth(token).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return,
+    };
+    let v: Value = match resp.json().await { Ok(v) => v, Err(_) => return };
+    let sessions = match v.get("sessions").and_then(|x| x.as_array()) {
+        Some(arr) => arr,
+        None => return,
+    };
+    let trimmed: Vec<Value> = sessions.iter().take(50).map(|s| {
+        let mut obj = serde_json::Map::new();
+        if let Some(x) = s.get("id") { obj.insert("id".into(), x.clone()); }
+        if let Some(x) = s.get("technician") { obj.insert("technician".into(), x.clone()); }
+        if let Some(x) = s.get("reason") { obj.insert("reason".into(), x.clone()); }
+        if let Some(x) = s.get("created_at") { obj.insert("created_at".into(), x.clone()); }
+        if let Some(x) = s.get("ended_at") { obj.insert("ended_at".into(), x.clone()); }
+        if let Some(x) = s.get("client_ip") { obj.insert("client_ip".into(), x.clone()); }
+        Value::Object(obj)
+    }).collect();
+    let json = serde_json::to_string(&trimmed).unwrap_or("[]".into());
+    Config::set_option(SESSION_HISTORY_KEY.to_string(), json);
+}
+
 // Decodificador base64 sem trazer crate nova. Aceita padding `=` opcional e ignora whitespace.
 fn base64_decode(s: &str) -> Option<Vec<u8>> {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -694,6 +729,10 @@ pub fn start() {
             // Branding (logo + nome empresa do cliente) a cada 5min.
             if tick * HEARTBEAT_INTERVAL_SECS % BRANDING_INTERVAL_SECS == 0 {
                 sync_branding(&token).await;
+            }
+            // Histórico de sessões (cd_session_history option) — mesma cadência do branding.
+            if tick * HEARTBEAT_INTERVAL_SECS % SESSION_HISTORY_INTERVAL_SECS == 0 {
+                sync_session_history(&token).await;
             }
             // Watchdog + Bombas a cada 60s (=2 ticks).
             if tick * HEARTBEAT_INTERVAL_SECS % PROBE_INTERVAL_SECS == 0 {
