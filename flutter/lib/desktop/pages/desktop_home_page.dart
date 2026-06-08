@@ -1316,21 +1316,7 @@ class _ConectDeskActiveTechCardState extends State<_ConectDeskActiveTechCard> {
                 // Header: avatar + nome + tempo
                 Row(
                   children: [
-                    Container(
-                      width: 46, height: 46,
-                      decoration: BoxDecoration(
-                        color: primary,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(color: primary.withOpacity(0.35), blurRadius: 12),
-                        ],
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        c.name.isNotEmpty ? c.name[0].toUpperCase() : '?',
-                        style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
-                      ),
-                    ),
+                    _CdSessionAvatar(fallbackName: c.name, primary: primary, size: 46),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1338,7 +1324,10 @@ class _ConectDeskActiveTechCardState extends State<_ConectDeskActiveTechCard> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            c.name.isNotEmpty ? c.name : 'Técnico',
+                            (() {
+                              final n = bind.mainGetOptionSync(key: 'cd_active_session_tech_name');
+                              return n.isNotEmpty ? n : (c.name.isNotEmpty ? c.name : 'Técnico');
+                            })(),
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w700,
@@ -1411,6 +1400,41 @@ class _ConectDeskActiveTechCardState extends State<_ConectDeskActiveTechCard> {
           Text(label, style: TextStyle(fontSize: 11.5, color: primary, fontWeight: FontWeight.w600)),
         ],
       ),
+    );
+  }
+}
+
+// Avatar do técnico no card de sessão ativa. Usa foto baixada pelo agent (sync_active_session_photo)
+// quando disponível; fallback inicial em círculo verde.
+class _CdSessionAvatar extends StatelessWidget {
+  final String fallbackName;
+  final Color primary;
+  final double size;
+  const _CdSessionAvatar({Key? key, required this.fallbackName, required this.primary, this.size = 46}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = bind.mainGetOptionSync(key: 'cd_active_session_tech_photo_path');
+    final techName = bind.mainGetOptionSync(key: 'cd_active_session_tech_name');
+    final name = techName.isNotEmpty ? techName : fallbackName;
+    final initial = name.isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    final f = p.isNotEmpty ? File(p) : null;
+    final hasPhoto = f != null && f.existsSync();
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        color: primary,
+        shape: BoxShape.circle,
+        boxShadow: [BoxShadow(color: primary.withOpacity(0.35), blurRadius: 12)],
+      ),
+      clipBehavior: Clip.antiAlias,
+      alignment: Alignment.center,
+      child: hasPhoto
+          ? Image.file(f!, fit: BoxFit.cover, width: size, height: size,
+              errorBuilder: (_, __, ___) => Text(initial,
+                  style: TextStyle(color: Colors.white, fontSize: size * 0.48, fontWeight: FontWeight.w800)))
+          : Text(initial,
+              style: TextStyle(color: Colors.white, fontSize: size * 0.48, fontWeight: FontWeight.w800)),
     );
   }
 }

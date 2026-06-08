@@ -15,6 +15,7 @@ import 'package:percent_indicator/linear_percent_indicator.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'dart:io' show File;
 
 import '../../common.dart';
 import '../../common/widgets/chat_page.dart';
@@ -1550,23 +1551,8 @@ class _ConectDeskApprovalScreen extends StatelessWidget {
                   ),
                   child: Row(
                     children: [
-                      // Avatar
-                      Container(
-                        width: 52, height: 52,
-                        decoration: BoxDecoration(
-                          color: const Color(0xff01A862),
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          client.name.isNotEmpty ? client.name[0].toUpperCase() : '?',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
+                      // Avatar — foto real do técnico se disponível, senão inicial.
+                      _CdTechAvatar(name: client.name, size: 52),
                       const SizedBox(width: 14),
                       // Nome + role
                       Expanded(
@@ -1575,7 +1561,9 @@ class _ConectDeskApprovalScreen extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              client.name.isNotEmpty ? client.name.toUpperCase() : 'TÉCNICO',
+                              (bind.mainGetOptionSync(key: 'cd_active_session_tech_name').isNotEmpty
+                                  ? bind.mainGetOptionSync(key: 'cd_active_session_tech_name')
+                                  : (client.name.isNotEmpty ? client.name : 'TÉCNICO')).toUpperCase(),
                               style: const TextStyle(
                                 color: Color(0xff1A1A1A),
                                 fontSize: 18,
@@ -1653,3 +1641,39 @@ class _ConectDeskApprovalScreen extends StatelessWidget {
     );
   }
 }
+
+
+// Avatar do técnico — usa foto real (option cd_active_session_tech_photo_path) quando
+// disponível, fallback pra inicial do nome em círculo verde.
+class _CdTechAvatar extends StatelessWidget {
+  final String name;
+  final double size;
+  const _CdTechAvatar({Key? key, required this.name, this.size = 52}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final p = bind.mainGetOptionSync(key: "cd_active_session_tech_photo_path");
+    final f = p.isNotEmpty ? File(p) : null;
+    final hasPhoto = f != null && f.existsSync();
+    final techName = bind.mainGetOptionSync(key: "cd_active_session_tech_name");
+    final displayName = techName.isNotEmpty ? techName : name;
+    final initial = displayName.isNotEmpty ? displayName.trim()[0].toUpperCase() : "?";
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xff01A862),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      alignment: Alignment.center,
+      child: hasPhoto
+          ? Image.file(f!, fit: BoxFit.cover, width: size, height: size,
+              errorBuilder: (_, __, ___) => Text(initial, style: TextStyle(
+                color: Colors.white, fontSize: size * 0.45, fontWeight: FontWeight.w800)))
+          : Text(initial, style: TextStyle(
+              color: Colors.white, fontSize: size * 0.45, fontWeight: FontWeight.w800)),
+    );
+  }
+}
+

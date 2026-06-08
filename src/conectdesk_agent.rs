@@ -39,6 +39,11 @@ const TOKEN_KEY: &str = "conectdesk_token";
 const BRANDING_TS_KEY: &str = "cd_logo_updated_at";
 const BRAND_NAME_KEY: &str = "cd_brand_name";
 const BRAND_LOGO_PATH_KEY: &str = "cd_brand_logo_path";
+// Sessão ativa (técnico atual) — sincronizada quando heartbeat retorna activeSession.
+// O Flutter UI (server_page approval screen + desktop_home_page card) consome estes options.
+const ACTIVE_SESSION_ID_KEY: &str = "cd_active_session_id";
+const ACTIVE_SESSION_TECH_NAME_KEY: &str = "cd_active_session_tech_name";
+const ACTIVE_SESSION_TECH_PHOTO_PATH_KEY: &str = "cd_active_session_tech_photo_path";
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const SYSINFO_INTERVAL_SECS: u64 = 600;     // 10 min
 const UPDATE_INTERVAL_SECS: u64 = 1800;     // 30 min
@@ -515,6 +520,82 @@ async fn sync_branding(token: &str) {
     log::info!("ConectDesk branding: sync ok ({} bytes, updated_at={})", bytes.len(), updated_at);
 }
 
+// Sincroniza foto + nome do técnico da sessão ativa. Chamada SOMENTE quando heartbeat
+// retorna activeSession.id != ao último salvo (evita re-download a cada 30s).
+async fn sync_active_session_photo(token: &str, session_id: &str, tech_name: &str) {
+    // Persiste id + nome imediatamente (Flutter mostra nome mesmo se download falhar).
+    Config::set_option(ACTIVE_SESSION_ID_KEY.to_string(), session_id.to_string());
+    Config::set_option(ACTIVE_SESSION_TECH_NAME_KEY.to_string(), tech_name.to_string());
+
+    let Some(base) = api_base() else { return };
+    let Some(client) = http_client(15) else { return };
+    let url = format!("{}/api/agents/me/active-session/photo", base);
+    let resp = match client.get(&url).bearer_auth(token).send().await {
+        Ok(r) if r.status().is_success() => r,
+        _ => return,
+    };
+    let v: Value = match resp.json().await { Ok(v) => v, Err(_) => return };
+    let photo = v.get("photo").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    if photo.is_empty() {
+        Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), String::new());
+        return;
+    }
+
+    // photo é data URL "data:image/png;base64,..." OU base64 puro.
+    let b64 = match photo.split_once("base64,") {
+        Some((_, rest)) => rest.trim().to_string(),
+        None => photo.trim().to_string(),
+    };
+    let bytes = match base64_decode(&b64) {
+        Some(b) => b,
+        None => { log::warn!("ConectDesk: tech photo base64 inválido"); return; }
+    };
+
+    let base_dir = if cfg!(target_os = "windows") {
+        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+    };
+    let dir = base_dir
+        .map(|d| d.join("ConectDesk"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ConectDesk"));
+    if std::fs::create_dir_all(&dir).is_err() { return; }
+    let path = dir.join("session_tech.png");
+    if std::fs::write(&path, &bytes).is_err() { return; }
+    Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), path.to_string_lossy().to_string());
+    log::info!("ConectDesk: tech photo gravada ({} bytes) session={}", bytes.len(), session_id);
+}
+
+fn clear_active_session() {
+    Config::set_option(ACTIVE_SESSION_ID_KEY.to_string(), String::new());
+    Config::set_option(ACTIVE_SESSION_TECH_NAME_KEY.to_string(), String::new());
+    Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), String::new());
+}
+
+// Decodificador base64 sem trazer crate nova. Aceita padding `=` opcional e ignora whitespace.
+fn base64_decode(s: &str) -> Option<Vec<u8>> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, &c) in TABLE.iter().enumerate() { lookup[c as usize] = i as u8; }
+    lookup[b'-' as usize] = 62; lookup[b'_' as usize] = 63; // url-safe variant
+    let clean: Vec<u8> = s.bytes().filter(|&b| !b.is_ascii_whitespace() && b != b'=').collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits: u32 = 0;
+    for &b in &clean {
+        let v = lookup[b as usize];
+        if v == 255 { return None; }
+        buf = (buf << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xff) as u8);
+        }
+    }
+    Some(out)
+}
+
 // Clean up the legacy "RustDesk" service if it co-exists with our gated "ConectDesk" service.
 // Run once on agent start. The fork runs as SYSTEM, so `sc.exe delete` works without UAC.
 #[cfg(target_os = "windows")]
@@ -577,6 +658,22 @@ pub fn start() {
                     if resp.get("requestUpdate").and_then(|v| v.as_bool()).unwrap_or(false) {
                         log::info!("ConectDesk: requestUpdate=true do painel — disparando update");
                         maybe_update().await;
+                    }
+                    // Sessão ativa: detecta nova ou fim. Quando muda id, baixa foto. Quando some, limpa.
+                    match resp.get("activeSession") {
+                        Some(s) if !s.is_null() => {
+                            let new_id = s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let new_name = s.get("technician").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let last_id = Config::get_option(ACTIVE_SESSION_ID_KEY);
+                            if !new_id.is_empty() && new_id != last_id {
+                                sync_active_session_photo(&token, &new_id, &new_name).await;
+                            }
+                        }
+                        _ => {
+                            if !Config::get_option(ACTIVE_SESSION_ID_KEY).is_empty() {
+                                clear_active_session();
+                            }
+                        }
                     }
                 }
                 None => {
