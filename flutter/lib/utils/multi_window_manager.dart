@@ -18,6 +18,9 @@ enum WindowType {
   ViewCamera,
   PortForward,
   Terminal,
+  // ConectDesk: widget canto direito inferior. Janela pequena, sempre on-top, frameless,
+  // mostra foto técnico + logo cliente + nome quando sessão está ativa.
+  CdWidget,
   Unknown
 }
 
@@ -36,6 +39,8 @@ extension Index on int {
         return WindowType.PortForward;
       case 5:
         return WindowType.Terminal;
+      case 6:
+        return WindowType.CdWidget;
       default:
         return WindowType.Unknown;
     }
@@ -65,6 +70,9 @@ class RustDeskMultiWindowManager {
   final List<int> _viewCameraWindows = List.empty(growable: true);
   final List<int> _portForwardWindows = List.empty(growable: true);
   final List<int> _terminalWindows = List.empty(growable: true);
+  // ConectDesk widget window ids (canto inferior direito sempre on-top). Esperamos só 1, mas
+  // mantemos lista pra simetria com os outros tipos. Helper: showCdWidget/closeCdWidget.
+  final List<int> _cdWidgetWindows = List.empty(growable: true);
 
   moveTabToNewWindow(int windowId, String peerId, String sessionId,
       WindowType windowType) async {
@@ -415,6 +423,8 @@ class RustDeskMultiWindowManager {
         return _portForwardWindows;
       case WindowType.Terminal:
         return _terminalWindows;
+      case WindowType.CdWidget:
+        return _cdWidgetWindows;
       case WindowType.Unknown:
         break;
     }
@@ -439,6 +449,8 @@ class RustDeskMultiWindowManager {
         break;
       case WindowType.Terminal:
         _terminalWindows.clear();
+      case WindowType.CdWidget:
+        _cdWidgetWindows.clear();
       case WindowType.Unknown:
         break;
     }
@@ -565,6 +577,42 @@ class RustDeskMultiWindowManager {
   // This function is called from one remote window.
   // Only the main window knows `_remoteDesktopWindows` and `_activeWindows`.
   // So we need to call the main window to get the other remote windows' coords.
+  // ConectDesk widget: spawna janela pequena frameless, always-on-top, canto inferior direito.
+  // Idempotente — se já existe, faz show()/focus(). Conteúdo da janela é decidido pelo own
+  // sub-route ("cd_widget") em main.dart via runWidgetWindow.
+  Future<int?> showCdWidget() async {
+    if (_cdWidgetWindows.isNotEmpty) {
+      try {
+        await DesktopMultiWindow.invokeMethod(
+            _cdWidgetWindows.first, kWindowEventShow, '');
+      } catch (_) {}
+      return _cdWidgetWindows.first;
+    }
+    final msg = jsonEncode({
+      'type': WindowType.CdWidget.index,
+      'cd_widget': true,
+    });
+    final controller = await DesktopMultiWindow.createWindow(msg);
+    controller
+      ..setFrame(const Offset(0, 0) & const Size(320, 140))
+      ..setTitle('ConectDesk')
+      ..center();
+    Future.delayed(const Duration(milliseconds: 80), () async {
+      try { await controller.show(); } catch (_) {}
+    });
+    _cdWidgetWindows.add(controller.windowId);
+    return controller.windowId;
+  }
+
+  Future<void> closeCdWidget() async {
+    for (final wid in List<int>.from(_cdWidgetWindows)) {
+      try {
+        await WindowController.fromWindowId(wid).close();
+      } catch (_) {}
+    }
+    _cdWidgetWindows.clear();
+  }
+
   Future<List<RemoteWindowCoords>> getOtherRemoteWindowCoordsFromMain() async {
     List<RemoteWindowCoords> coords = [];
     // Call the main window to get the coords of other remote windows.

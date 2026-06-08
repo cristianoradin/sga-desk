@@ -10,6 +10,7 @@ import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
+import 'package:flutter_hbb/desktop/pages/cd_widget_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_view_camera_screen.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_port_forward_screen.dart';
@@ -22,6 +23,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:window_size/window_size.dart' as window_size;
 
 import 'common.dart';
 import 'consts.dart';
@@ -99,6 +101,11 @@ Future<void> main(List<String> args) async {
           argument,
           kAppTypeDesktopTerminal,
         );
+        break;
+      case WindowType.CdWidget:
+        desktopType = DesktopType.main;
+        await windowManager.ensureInitialized();
+        runCdWidgetWindow();
       default:
         break;
     }
@@ -285,6 +292,35 @@ void runMultiWindow(
   }
   // show window from hidden status
   WindowController.fromWindowId(kWindowId!).show();
+}
+
+// ConectDesk widget: janela pequena always-on-top no canto inferior direito da tela. Mostra
+// foto técnico + logo cliente + nome quando sessão está ativa; em idle só mostra logo.
+// Conteúdo controlado por CdWidgetPage; size 320x140, sem decoração de janela.
+void runCdWidgetWindow() async {
+  await initEnv(kAppTypeMain);
+  _runApp(
+    '',
+    const CdWidgetPage(),
+    MyTheme.currentThemeMode(),
+  );
+  // Sub-window precisa usar WindowController.fromWindowId(kWindowId!) — `windowManager` é
+  // singleton da janela principal.
+  final ctrl = WindowController.fromWindowId(kWindowId!);
+  try { await ctrl.setFrame(const Rect.fromLTWH(0, 0, 320, 140)); } catch (_) {}
+  try { await ctrl.setTitle('ConectDesk'); } catch (_) {}
+  // Posiciona canto inferior direito da tela primária.
+  try {
+    final screens = await window_size.getScreenList();
+    final primary = screens.isNotEmpty ? screens.first : null;
+    if (primary != null) {
+      final frame = primary.visibleFrame;
+      final x = frame.right - 320 - 16;
+      final y = frame.bottom - 140 - 16;
+      await ctrl.setFrame(Rect.fromLTWH(x, y, 320, 140));
+    }
+  } catch (_) {}
+  try { await ctrl.show(); } catch (_) {}
 }
 
 void runConnectionManagerScreen() async {
