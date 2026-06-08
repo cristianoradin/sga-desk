@@ -559,7 +559,7 @@ pub fn start() {
                     continue;
                 }
             }
-            // Heartbeat — response carries dynamic config + WoL queue.
+            // Heartbeat — response carries dynamic config + WoL queue + on-demand flags.
             match heartbeat(&token).await {
                 Some(resp) => {
                     if let Some(req_appr) = resp.get("requireApproval").and_then(|v| v.as_bool()) {
@@ -567,6 +567,13 @@ pub fn start() {
                     }
                     if let Some(wol) = resp.get("wol").and_then(|v| v.as_array()) {
                         if !wol.is_empty() { dispatch_wol(wol).await; }
+                    }
+                    // ConectDesk: update on-demand. O painel marca requestUpdate=true só quando
+                    // o técnico clica "Atualizar". Antes era loop automatic → re-instalava em
+                    // ciclo eterno por causa do build_id != compile_id no publish-fork.sh.
+                    if resp.get("requestUpdate").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        log::info!("ConectDesk: requestUpdate=true do painel — disparando update");
+                        maybe_update().await;
                     }
                 }
                 None => {
@@ -581,10 +588,9 @@ pub fn start() {
             if tick * HEARTBEAT_INTERVAL_SECS % SYSINFO_INTERVAL_SECS == 0 {
                 let _ = send_sysinfo(&token).await;
             }
-            // Update.
-            if tick * HEARTBEAT_INTERVAL_SECS % UPDATE_INTERVAL_SECS == 0 {
-                maybe_update().await;
-            }
+            // Update agora é ON-DEMAND (vem via heartbeat resp.requestUpdate quando o painel
+            // marca). Removido o auto-loop de 30min — gerava re-install eterno porque o
+            // publish-fork.sh usava timestamp do publish, diferente do build_id compilado.
             // Branding (logo + nome empresa do cliente) a cada 5min.
             if tick * HEARTBEAT_INTERVAL_SECS % BRANDING_INTERVAL_SECS == 0 {
                 sync_branding(&token).await;
