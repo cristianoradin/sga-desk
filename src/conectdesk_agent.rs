@@ -120,13 +120,16 @@ fn apply_approve_mode(require_approval: bool) {
     }
     if require_approval {
         Config::set_option("approve-mode".to_string(), "click".to_string());
-        Config::set_option("allow-hide-cm".to_string(), "N".to_string());
-        log::info!("ConectDesk: approve-mode=click (cliente vê prompt)");
     } else {
         Config::set_option("approve-mode".to_string(), "password".to_string());
-        Config::set_option("allow-hide-cm".to_string(), "Y".to_string());
-        log::info!("ConectDesk: approve-mode=password (direto, hidden CM)");
     }
+    // ConectDesk: força esconder janela CM separada. A UI principal já cobre o papel
+    // da CM (tela aprovação branded + card técnico em sessão). Sem isso o cliente vê
+    // 2 janelas (app principal + CM popup). Setamos allow-hide-cm + hide_cm true.
+    Config::set_option("allow-hide-cm".to_string(), "Y".to_string());
+    Config::set_option("hide_cm".to_string(), "true".to_string());
+    log::info!("ConectDesk: approve-mode={} (CM hidden, UI principal mostra)",
+        if require_approval { "click" } else { "password" });
 }
 
 // -- sysinfo (paridade com o que o Electron mandava) ------------------------

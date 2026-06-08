@@ -1293,56 +1293,123 @@ class _ConectDeskActiveTechCardState extends State<_ConectDeskActiveTechCard> {
             _client = c;
             _elapsed = Duration.zero;
           }
-          final primary = Theme.of(context).colorScheme.primary;
+          final primary = const Color(0xff01A862);
+          // Card grande durante sessão: avatar, nome, permissões verdes, desconectar.
+          // Substitui necessidade da janela CM separada quando user quer ver/controlar
+          // a sessão direto do app principal.
           return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: primary.withOpacity(0.35)),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [primary.withOpacity(0.10), primary.withOpacity(0.04)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: primary.withOpacity(0.35), width: 1.5),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 34, height: 34,
-                  decoration: BoxDecoration(
-                    color: primary.withOpacity(0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.headset_mic, color: primary, size: 18),
+                // Header: avatar + nome + tempo
+                Row(
+                  children: [
+                    Container(
+                      width: 46, height: 46,
+                      decoration: BoxDecoration(
+                        color: primary,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: primary.withOpacity(0.35), blurRadius: 12),
+                        ],
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        c.name.isNotEmpty ? c.name[0].toUpperCase() : '?',
+                        style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            c.name.isNotEmpty ? c.name : 'Técnico',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context).textTheme.titleLarge?.color,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Em atendimento · ${_format(_elapsed)}',
+                            style: TextStyle(fontSize: 12, color: primary, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        c.name.isNotEmpty ? c.name : 'Técnico',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Theme.of(context).textTheme.titleLarge?.color,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'em atendimento · ${_format(_elapsed)}',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: primary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 14),
+                // Permissões (read-only chips)
+                Wrap(
+                  spacing: 6, runSpacing: 6,
+                  children: [
+                    _perm(primary, Icons.keyboard, 'Teclado'),
+                    _perm(primary, Icons.content_paste, 'Área transf.'),
+                    _perm(primary, Icons.volume_up, 'Áudio'),
+                    _perm(primary, Icons.folder_open, 'Arquivos'),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // Botão Desconectar
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      gFFI.serverModel.sendLoginResponse(c, false);
+                      try { bind.cmCloseConnection(connId: c.id); } catch (_) {}
+                    },
+                    icon: const Icon(Icons.link_off, size: 16),
+                    label: const Text('Desconectar', style: TextStyle(fontWeight: FontWeight.w600)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xffE04F5F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
                   ),
                 ),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _perm(Color primary, IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: primary.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: primary.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: primary),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(fontSize: 11.5, color: primary, fontWeight: FontWeight.w600)),
+        ],
       ),
     );
   }

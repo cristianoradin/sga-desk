@@ -86,6 +86,14 @@ pub fn approve_mode() -> ApproveMode {
 }
 
 pub fn hide_cm() -> bool {
+    // ConectDesk: SEMPRE esconde a janela CM. Tudo (aprovação + card técnico em sessão)
+    // acontece dentro da UI principal (desktop_home_page com _ConectDeskApprovalScreen
+    // e _ConectDeskActiveTechCard). Não queremos 2 janelas no desktop do cliente final.
+    // A condição original (approve-mode=password && permanent-password && allow-hide-cm)
+    // continua válida pra qualquer build standalone do RustDesk.
+    if crate::config::option2bool("allow-hide-cm", &Config::get_option("allow-hide-cm")) {
+        return true;
+    }
     approve_mode() == ApproveMode::Password
         && verification_method() == VerificationMethod::OnlyUsePermanentPassword
         && crate::config::option2bool("allow-hide-cm", &Config::get_option("allow-hide-cm"))
