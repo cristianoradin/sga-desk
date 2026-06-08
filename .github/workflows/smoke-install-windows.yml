@@ -1,0 +1,149 @@
+# Smoke test do instalador Windows. Roda em windows-latest, baixa o artefato do build,
+# instala silent e valida que o service registra + conecta no rendezvous. Se qualquer check
+# falhar, falha o job → publish-fork.sh deve checar este status antes de publicar.
+#
+# Trigger: depois que Flutter Nightly Build completa. Filtra só sucesso pra não tentar
+# instalar artefato quebrado.
+name: Smoke Install Windows
+
+on:
+  workflow_run:
+    workflows: ["Flutter Nightly Build"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Run id do build pra testar
+        required: true
+        type: string
+
+jobs:
+  smoke-install:
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve build run id
+        id: build
+        shell: pwsh
+        run: |
+          $rid = if ('${{ github.event_name }}' -eq 'workflow_dispatch') { '${{ inputs.run_id }}' } else { '${{ github.event.workflow_run.id }}' }
+          "run_id=$rid" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "Build run id: $rid"
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: conectdesk-installer-windows-x86_64
+          path: artifact
+          run-id: ${{ steps.build.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate installer
+        id: locate
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path artifact -Filter "rustdesk-*-x86_64.exe" -Recurse | Select-Object -First 1
+          if (-not $exe) { throw "Installer .exe não encontrado no artefato" }
+          Write-Host "Installer: $($exe.FullName) ($([math]::Round($exe.Length/1MB,1)) MB)"
+          "installer=$($exe.FullName)" | Out-File -Append $env:GITHUB_OUTPUT
+
+      - name: Run installer (silent)
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.locate.outputs.installer }}"
+          Write-Host "Executando: $exe"
+          # Install.exe é o portable-packer com manifest requireAdministrator. Em CI o runner
+          # já roda como administrador, então UAC é auto-aceito. Spawn detached pra não bloquear.
+          $p = Start-Process -FilePath $exe -PassThru
+          Write-Host "Installer PID: $($p.Id) — aguardando 90s pra completar setup + register service"
+          Start-Sleep -Seconds 90
+
+      - name: Validate installation
+        shell: pwsh
+        run: |
+          $errors = @()
+
+          # 1. Pasta Program Files\ConectDesk
+          $instDir = 'C:\Program Files\ConectDesk'
+          if (Test-Path $instDir) {
+            Write-Host "✅ Pasta criada: $instDir"
+            Get-ChildItem $instDir | Select-Object Name, Length | Format-Table
+          } else {
+            $errors += "❌ Pasta $instDir NÃO existe"
+          }
+
+          # 2. Binário (case insensitive)
+          $exe = Get-ChildItem -Path $instDir -Filter "*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^[Cc]onect[Dd]esk\.exe$' } | Select-Object -First 1
+          if ($exe) {
+            Write-Host "✅ Binário: $($exe.FullName) ($([math]::Round($exe.Length/1KB,1)) KB)"
+          } else {
+            $errors += "❌ ConectDesk.exe NÃO existe em $instDir"
+          }
+
+          # 3. Service registrado + RUNNING
+          $svc = Get-Service -Name "ConectDesk" -ErrorAction SilentlyContinue
+          if ($null -eq $svc) {
+            $errors += "❌ Service ConectDesk NÃO REGISTRADO — install_me falhou silencioso (provável stop-service flag ou get_create_service skip)"
+          } elseif ($svc.Status -ne 'Running') {
+            $errors += "❌ Service ConectDesk status=$($svc.Status) (esperado Running)"
+          } else {
+            Write-Host "✅ Service ConectDesk: Running"
+          }
+
+          # 4. Processo conectdesk.exe rodando
+          $procs = Get-Process -Name "conectdesk", "ConectDesk" -ErrorAction SilentlyContinue
+          if ($procs) {
+            Write-Host "✅ Processo rodando:"
+            $procs | Select-Object Id, ProcessName, Path | Format-Table
+          } else {
+            $errors += "❌ Nenhum processo conectdesk rodando"
+          }
+
+          # 5. Conexão saindo pro rendezvous (porta 21116 UDP / 21115 TCP)
+          # Tolera tempo de boot: aguarda até 30s pra peer registrar
+          $netOk = $false
+          for ($i = 0; $i -lt 6; $i++) {
+            Start-Sleep -Seconds 5
+            $conns = netstat -ano | Select-String "21115|21116|21117"
+            if ($conns) { $netOk = $true; Write-Host "✅ Conexões rendezvous detectadas:"; $conns | ForEach-Object { Write-Host "  $_" }; break }
+            Write-Host "  Aguardando rendezvous (tentativa $($i+1)/6)..."
+          }
+          if (-not $netOk) {
+            $errors += "❌ Sem conexão pra 21115/21116/21117 após 30s — config baked não importou OU hbbs unreachable do runner"
+          }
+
+          # 6. Firewall regras
+          $rules = Get-NetFirewallRule -DisplayName "ConectDesk Service" -ErrorAction SilentlyContinue
+          if ($rules) {
+            Write-Host "✅ Firewall regras: $($rules.Count) ($(($rules | ForEach-Object { $_.Direction }) -join ', '))"
+          } else {
+            $errors += "⚠️  Firewall sem regras ConectDesk Service (não-bloqueante)"
+          }
+
+          # Resultado
+          if ($errors.Count -gt 0) {
+            Write-Host "`n=== SMOKE TEST FALHOU ===" -ForegroundColor Red
+            $errors | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+            exit 1
+          }
+          Write-Host "`n=== SMOKE TEST PASSOU ===" -ForegroundColor Green
+
+      - name: Collect logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "=== Service profile log ==="
+          Get-Content "C:\Windows\System32\config\systemprofile\AppData\Roaming\ConectDesk\log\server\*.log" -Tail 80 -ErrorAction SilentlyContinue
+          Write-Host "`n=== LocalService log ==="
+          Get-Content "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\ConectDesk\log\server\*.log" -Tail 80 -ErrorAction SilentlyContinue
+          Write-Host "`n=== Event Viewer ==="
+          Get-WinEvent -LogName Application -MaxEvents 30 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'ConectDesk|rustdesk|silent-install' } | Format-List TimeCreated, LevelDisplayName, Message
+          Write-Host "`n=== sc query type=service state=all (filter conect) ==="
+          sc.exe query type=service state=all | Select-String -Pattern "conect" -Context 0,5
