@@ -18,24 +18,31 @@ class CdWidgetPage extends StatefulWidget {
   State<CdWidgetPage> createState() => _CdWidgetPageState();
 }
 
-class _CdWidgetPageState extends State<CdWidgetPage> {
+class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderStateMixin {
   Timer? _poll;
   String _techName = '';
   String _techPhotoPath = '';
   String _brandName = '';
   String _brandLogoPath = '';
   String _sessionId = '';
+  late final AnimationController _fade;
+  late final Animation<double> _fadeAnim;
 
   @override
   void initState() {
     super.initState();
+    _fade = AnimationController(vsync: this, duration: const Duration(milliseconds: 320));
+    _fadeAnim = CurvedAnimation(parent: _fade, curve: Curves.easeOutCubic);
     _refresh();
     _poll = Timer.periodic(const Duration(milliseconds: 1500), (_) => _refresh());
+    // Fade-in 60ms depois do build pra evitar flash do gradient enquanto Flutter mede frame.
+    Future.delayed(const Duration(milliseconds: 60), () { if (mounted) _fade.forward(); });
   }
 
   @override
   void dispose() {
     _poll?.cancel();
+    _fade.dispose();
     super.dispose();
   }
 
@@ -64,7 +71,11 @@ class _CdWidgetPageState extends State<CdWidgetPage> {
         backgroundColor: Colors.transparent,
         body: GestureDetector(
           onPanStart: (_) async { try { await windowManager.startDragging(); } catch (_) {} },
-          child: Container(
+          child: FadeTransition(
+            opacity: _fadeAnim,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.92, end: 1.0).animate(_fadeAnim),
+              child: Container(
             margin: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
@@ -79,6 +90,8 @@ class _CdWidgetPageState extends State<CdWidgetPage> {
               child: hasSession ? _sessionBody(brand) : _idleBody(brand),
             ),
           ),
+        ),
+      ),
         ),
       ),
     );

@@ -16,6 +16,7 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:io' show File;
+import 'package:flutter/services.dart';
 
 import '../../common.dart';
 import '../../common/widgets/chat_page.dart';
@@ -1474,9 +1475,25 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
  * escudo no topo, card técnico, botões "Permitir acesso" / "Negar".
  * Aciona quando há um Client unauthorized + not disconnected.
  * ===================================================================== */
-class _ConectDeskApprovalScreen extends StatelessWidget {
+class _ConectDeskApprovalScreen extends StatefulWidget {
   final Client client;
   const _ConectDeskApprovalScreen({Key? key, required this.client}) : super(key: key);
+
+  @override
+  State<_ConectDeskApprovalScreen> createState() => _ConectDeskApprovalScreenState();
+}
+
+class _ConectDeskApprovalScreenState extends State<_ConectDeskApprovalScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Alerta sonoro nativo OS — usuário longe da tela percebe pedido de aprovação.
+    // SystemSound não exige dep extra; HapticFeedback adiciona vibração em laptops.
+    Future.microtask(() async {
+      try { await SystemSound.play(SystemSoundType.alert); } catch (_) {}
+      try { await HapticFeedback.mediumImpact(); } catch (_) {}
+    });
+  }
 
   String _brandName(BuildContext context) {
     final n = bind.mainGetOptionSync(key: 'cd_brand_name');
@@ -1484,17 +1501,18 @@ class _ConectDeskApprovalScreen extends StatelessWidget {
   }
 
   void _accept(BuildContext context) {
-    gFFI.serverModel.sendLoginResponse(client, true);
+    gFFI.serverModel.sendLoginResponse(widget.client, true);
     try { windowManager.minimize(); } catch (_) {}
   }
 
   void _deny(BuildContext context) {
-    gFFI.serverModel.sendLoginResponse(client, false);
+    gFFI.serverModel.sendLoginResponse(widget.client, false);
   }
 
   @override
   Widget build(BuildContext context) {
     final brand = _brandName(context);
+    final client = widget.client;
     return Material(
       child: Container(
         decoration: const BoxDecoration(
