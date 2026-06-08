@@ -172,6 +172,16 @@ class ConnectionManagerState extends State<ConnectionManager>
       }
     }
 
+    // ConectDesk: quando há um cliente esperando aprovação (não autorizado, não disconnected),
+    // mostramos uma tela full-screen com o design ConectDesk (gradient verde, escudo, card
+    // técnico, botões Permitir/Negar) em vez do CM padrão do RustDesk. Substitui o popup
+    // RustDesk-style por algo branded e direto.
+    final pendingClient = serverModel.clients.firstWhereOrNull(
+        (c) => !c.authorized && !c.disconnected);
+    if (pendingClient != null) {
+      return _ConectDeskApprovalScreen(client: pendingClient);
+    }
+
     return serverModel.clients.isEmpty
         ? Column(
             children: [
@@ -1453,6 +1463,193 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
                   : statusListView(jobTable);
             },
           )),
+    );
+  }
+}
+
+/* =====================================================================
+ * ConectDesk — Tela full-screen de aprovação de conexão.
+ * Substitui o CM popup do RustDesk por algo branded: gradient verde,
+ * escudo no topo, card técnico, botões "Permitir acesso" / "Negar".
+ * Aciona quando há um Client unauthorized + not disconnected.
+ * ===================================================================== */
+class _ConectDeskApprovalScreen extends StatelessWidget {
+  final Client client;
+  const _ConectDeskApprovalScreen({Key? key, required this.client}) : super(key: key);
+
+  String _brandName(BuildContext context) {
+    final n = bind.mainGetOptionSync(key: 'cd_brand_name');
+    return n.isNotEmpty ? n : 'SGA Petro';
+  }
+
+  void _accept(BuildContext context) {
+    gFFI.serverModel.sendLoginResponse(client, true);
+    try { windowManager.minimize(); } catch (_) {}
+  }
+
+  void _deny(BuildContext context) {
+    gFFI.serverModel.sendLoginResponse(client, false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = _brandName(context);
+    return Material(
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xff0A6A3A), Color(0xff01A862)],
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Ícone escudo
+                Container(
+                  width: 64, height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.0),
+                    border: Border.all(color: Colors.white, width: 2.5),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.shield_outlined, color: Colors.white, size: 36),
+                ),
+                const SizedBox(height: 18),
+                // Título
+                const Text(
+                  'Permitir conexão?',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Subtítulo
+                Text(
+                  'Um técnico da $brand está pedindo acesso remoto a esta máquina.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Color(0xCCFFFFFF),
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 26),
+                // Card técnico
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      // Avatar
+                      Container(
+                        width: 52, height: 52,
+                        decoration: BoxDecoration(
+                          color: const Color(0xff01A862),
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          client.name.isNotEmpty ? client.name[0].toUpperCase() : '?',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      // Nome + role
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              client.name.isNotEmpty ? client.name.toUpperCase() : 'TÉCNICO',
+                              style: const TextStyle(
+                                color: Color(0xff1A1A1A),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'Técnico ConectDesk',
+                              style: TextStyle(
+                                color: Color(0xff666666),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 26),
+                // Botão Permitir
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => _accept(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xff01A862),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.check, size: 22),
+                        SizedBox(width: 8),
+                        Text(
+                          'Permitir acesso',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Botão Negar
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => _deny(context),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0x66FFFFFF), width: 1.5),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Negar',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
