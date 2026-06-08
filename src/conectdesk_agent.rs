@@ -129,16 +129,20 @@ fn apply_approve_mode(require_approval: bool) {
     }
     if require_approval {
         Config::set_option("approve-mode".to_string(), "click".to_string());
+        // Modo click PRECISA do CM visível: é nele que aparece a tela de aprovação branded
+        // (_ConectDeskApprovalScreen em server_page). Esconder o CM aqui fazia o cliente nunca
+        // ver o pedido — técnico ficava preso em "aguardando autorização".
+        Config::set_option("allow-hide-cm".to_string(), "N".to_string());
+        Config::set_option("hide_cm".to_string(), "false".to_string());
     } else {
         Config::set_option("approve-mode".to_string(), "password".to_string());
+        // Modo direto/senha: não há prompt de aprovação, então escondemos o CM popup.
+        Config::set_option("allow-hide-cm".to_string(), "Y".to_string());
+        Config::set_option("hide_cm".to_string(), "true".to_string());
     }
-    // ConectDesk: força esconder janela CM separada. A UI principal já cobre o papel
-    // da CM (tela aprovação branded + card técnico em sessão). Sem isso o cliente vê
-    // 2 janelas (app principal + CM popup). Setamos allow-hide-cm + hide_cm true.
-    Config::set_option("allow-hide-cm".to_string(), "Y".to_string());
-    Config::set_option("hide_cm".to_string(), "true".to_string());
-    log::info!("ConectDesk: approve-mode={} (CM hidden, UI principal mostra)",
-        if require_approval { "click" } else { "password" });
+    log::info!("ConectDesk: approve-mode={} (hide_cm={})",
+        if require_approval { "click" } else { "password" },
+        if require_approval { "false" } else { "true" });
 }
 
 // -- sysinfo (paridade com o que o Electron mandava) ------------------------
