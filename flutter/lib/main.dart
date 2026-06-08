@@ -299,6 +299,8 @@ void runMultiWindow(
 // Conteúdo controlado por CdWidgetPage; size 320x140, sem decoração de janela.
 void runCdWidgetWindow() async {
   await initEnv(kAppTypeMain);
+  // ensureInitialized é necessário pra window_manager controlar a sub-window via singleton.
+  try { await windowManager.ensureInitialized(); } catch (_) {}
   _runApp(
     '',
     const CdWidgetPage(),
@@ -309,12 +311,13 @@ void runCdWidgetWindow() async {
   final ctrl = WindowController.fromWindowId(kWindowId!);
   try { await ctrl.setFrame(const Rect.fromLTWH(0, 0, 320, 140)); } catch (_) {}
   try { await ctrl.setTitle('ConectDesk'); } catch (_) {}
-  // alwaysOnTop fica TRUE pra widget hover sobre janelas normais; ainda perde pra apps
-  // em fullscreen exclusivo (jogos/players DirectX) — limitação OS, não dá pra contornar
-  // sem hook nativo. setHasShadow(false) reduz flicker quando o widget é arrastado.
-  try { await ctrl.setAlwaysOnTop(true); } catch (_) {}
-  try { await ctrl.setSkipTaskbar(true); } catch (_) {}
-  try { await ctrl.setHasShadow(false); } catch (_) {}
+  // alwaysOnTop / skipTaskbar / hasShadow não estão expostos no fork do
+  // desktop_multi_window. Usamos `windowManager` (singleton da janela atual em sub-windows
+  // do package window_manager) — funciona porque ambos packages anexam à mesma janela.
+  // Ainda perde pra apps em fullscreen exclusivo (jogos/players DirectX) — limitação OS.
+  try { await windowManager.setAlwaysOnTop(true); } catch (_) {}
+  try { await windowManager.setSkipTaskbar(true); } catch (_) {}
+  try { await windowManager.setHasShadow(false); } catch (_) {}
   // Posiciona canto inferior direito da tela primária.
   try {
     final screens = await window_size.getScreenList();
