@@ -1666,19 +1666,24 @@ Future<bool> matchPeer(
 }
 
 /// Get the image for the current [platform].
-Widget getPlatformImage(String platform, {double size = 50}) {
+Widget getPlatformImage(String platform, {double size = 50, Color? color}) {
   if (platform.isEmpty) {
     return Container(width: size, height: size);
   }
+  // ConectDesk: os assets win/mac/linux.svg não existem no fork (removidos), então
+  // SvgPicture.asset renderizava vazio — no file transfer só aparecia o quadrado verde de
+  // fundo, sem logo. Usamos ícones Material (sempre presentes, sem depender de asset).
+  IconData icon;
   if (platform == kPeerPlatformMacOS) {
-    platform = 'mac';
-  } else if (platform != kPeerPlatformLinux &&
-      platform != kPeerPlatformAndroid) {
-    platform = 'win';
+    icon = Icons.laptop_mac;
+  } else if (platform == kPeerPlatformLinux) {
+    icon = Icons.computer;
+  } else if (platform == kPeerPlatformAndroid) {
+    icon = Icons.phone_android;
   } else {
-    platform = platform.toLowerCase();
+    icon = Icons.desktop_windows;
   }
-  return SvgPicture.asset('assets/$platform.svg', height: size, width: size);
+  return Icon(icon, size: size, color: color);
 }
 
 class LastWindowPosition {

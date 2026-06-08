@@ -535,7 +535,8 @@ class _FileManagerViewState extends State<FileManagerView> {
                               builder: (context, snapshot) {
                                 if (snapshot.hasData &&
                                     snapshot.data!.isNotEmpty) {
-                                  return getPlatformImage('${snapshot.data}');
+                                  // Ícone branco sobre o fundo verde (MyTheme.accent) do header.
+                                  return getPlatformImage('${snapshot.data}', color: Colors.white);
                                 } else {
                                   return CircularProgressIndicator(
                                     color: Theme.of(context)
