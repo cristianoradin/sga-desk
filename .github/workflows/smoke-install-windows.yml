@@ -116,21 +116,32 @@ jobs:
             $errors += "❌ Nenhum processo conectdesk rodando"
           }
 
-          # 5. Conexão saindo pro rendezvous. Aguarda até 90s (boot do service + NAT test +
-          #    handshake). netstat -ano filtra pelo PID do service pra evitar falso-positivo
-          #    de outra coisa na porta.
-          $svcPid = (Get-CimInstance Win32_Service -Filter "Name='ConectDesk'" -ErrorAction SilentlyContinue).ProcessId
-          Write-Host "Service PID: $svcPid"
-          $netOk = $false
+          # 5. Conexão REAL com o servidor — validada pelo LOG, não netstat.
+          #    A conexão rendezvous é UDP outbound (0.0.0.0:efêmera → hbbs:21116); netstat -ano
+          #    não mostra o remote de socket UDP, então filtrar porta/IP dá falso-negativo.
+          #    A prova confiável é o log do server: "Got nat response" (alcançou hbbs) e/ou
+          #    "enrolled" (autenticou na API). Procuramos em todos os perfis de log.
+          $logGlobs = @(
+            "C:\Windows\System32\config\systemprofile\AppData\Roaming\ConectDesk\log\server\*.log",
+            "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\ConectDesk\log\server\*.log",
+            "C:\Windows\ServiceProfiles\NetworkService\AppData\Roaming\ConectDesk\log\server\*.log"
+          )
+          $connOk = $false; $enrollOk = $false
           for ($i = 0; $i -lt 18; $i++) {
             Start-Sleep -Seconds 5
-            # qualquer conexão ESTABLISHED OU porta rendezvous
-            $conns = netstat -ano | Select-String "21115|21116|21117|143.208.86.5"
-            if ($conns) { $netOk = $true; Write-Host "✅ Conexões rendezvous detectadas:"; $conns | ForEach-Object { Write-Host "  $_" }; break }
-            Write-Host "  Aguardando rendezvous (tentativa $($i+1)/18, +$(($i+1)*5)s)..."
+            foreach ($g in $logGlobs) {
+              $txt = Get-Content $g -ErrorAction SilentlyContinue -Raw
+              if ($txt -match "Got nat response from") { $connOk = $true }
+              if ($txt -match "ConectDesk: enrolled" -or $txt -match "rendezvous mediator") { $enrollOk = $true }
+            }
+            if ($connOk) { break }
+            Write-Host "  Aguardando conexão rendezvous no log (tentativa $($i+1)/18, +$(($i+1)*5)s)..."
           }
-          if (-not $netOk) {
-            $errors += "❌ Sem conexão pra rendezvous após 90s — server thread não iniciou OU hbbs unreachable"
+          if ($connOk) {
+            Write-Host "✅ Conexão rendezvous confirmada no log (nat response de hbbs)"
+            if ($enrollOk) { Write-Host "✅ Enroll/rendezvous mediator ativo" }
+          } else {
+            $errors += "❌ Log do server NÃO mostra 'Got nat response' após 90s — server não alcançou hbbs"
           }
 
           # 6. Firewall regras
