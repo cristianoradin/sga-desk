@@ -423,33 +423,53 @@ fn parse_fork_feed(s: &str) -> Option<(u64, String, String, Option<String>)> {
     Some((build_id?, version, exe?, sha512))
 }
 
+// Reporta progresso de atualização pro painel (POST /api/agents/me/update-status).
+// Best-effort — falha silenciosamente. token vazio = sem op (agent ainda não enrollou).
+async fn report_update_status(token: &str, status: &str, message: &str) {
+    if token.is_empty() { return; }
+    let Some(base) = api_base() else { return };
+    let Some(client) = http_client(10) else { return };
+    let url = format!("{}/api/agents/me/update-status", base);
+    let body = json!({"status": status, "message": message});
+    let _ = client.post(&url).bearer_auth(token).json(&body).send().await;
+}
+
 #[cfg(target_os = "windows")]
 async fn maybe_update() {
+    let token = saved_token();
     let Some(base) = api_base() else { return };
     let Some(client) = http_client(30) else { return };
+    report_update_status(&token, "checking", "Verificando fork-latest.yml").await;
     let url = format!("{}/updates/fork-latest.yml", base);
     let body = match client.get(&url).send().await {
         Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
-        _ => return,
+        _ => { report_update_status(&token, "failed", "Falha ao buscar feed").await; return; }
     };
-    let Some((remote_build, remote_version, exe, _sha512)) = parse_fork_feed(&body) else { return };
+    let Some((remote_build, remote_version, exe, _sha512)) = parse_fork_feed(&body) else {
+        report_update_status(&token, "failed", "Feed inválido").await;
+        return;
+    };
     let local = local_build_id();
     if remote_build <= local {
         log::debug!("ConectDesk update: up-to-date (local={}, remote={})", local, remote_build);
+        report_update_status(&token, "done", &format!("Já está em {} ({})", remote_version, local)).await;
         return;
     }
     log::info!("ConectDesk update: {} -> {} (downloading {})", local, remote_version, exe);
+    report_update_status(&token, "downloading", &format!("Baixando {} (build {})", remote_version, remote_build)).await;
     let url_safe = exe.replace(' ', "%20");
     let dl_url = format!("{}/updates/{}", base, url_safe);
     let bytes = match client.get(&dl_url).send().await {
-        Ok(r) if r.status().is_success() => match r.bytes().await { Ok(b) => b, Err(_) => return },
-        _ => { log::warn!("ConectDesk update: download failed"); return; }
+        Ok(r) if r.status().is_success() => match r.bytes().await { Ok(b) => b, Err(_) => { report_update_status(&token, "failed", "Falha ao ler corpo do download").await; return; } },
+        _ => { log::warn!("ConectDesk update: download failed"); report_update_status(&token, "failed", "Download falhou").await; return; }
     };
     let tmp = std::env::temp_dir().join(format!("ConectDesk-Update-{}.exe", remote_build));
     if std::fs::write(&tmp, &bytes).is_err() {
         log::error!("ConectDesk update: failed to write {:?}", tmp);
+        report_update_status(&token, "failed", "Falha ao gravar instalador temporário").await;
         return;
     }
+    report_update_status(&token, "installing", &format!("Instalando {} (silent)", remote_version)).await;
     // Detached PowerShell: stop service, install silent, restart. The current process gets killed
     // mid-install when the service stops — that's expected. The detached child survives and finishes.
     let ps = format!(
