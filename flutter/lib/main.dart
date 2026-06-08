@@ -299,25 +299,17 @@ void runMultiWindow(
 // Conteúdo controlado por CdWidgetPage; size 320x140, sem decoração de janela.
 void runCdWidgetWindow() async {
   await initEnv(kAppTypeMain);
-  // ensureInitialized é necessário pra window_manager controlar a sub-window via singleton.
-  try { await windowManager.ensureInitialized(); } catch (_) {}
   _runApp(
     '',
     const CdWidgetPage(),
     MyTheme.currentThemeMode(),
   );
-  // Sub-window precisa usar WindowController.fromWindowId(kWindowId!) — `windowManager` é
-  // singleton da janela principal.
+  // Sub-window é controlada SÓ por WindowController.fromWindowId — NÃO usar o singleton
+  // windowManager aqui (ele pertence à janela principal; mexê-lo de uma sub-window deixava
+  // uma janela branca e atrapalhava a main UI). alwaysOnTop/skipTaskbar não estão expostos
+  // no WindowController do fork — widget aparece como janela normal no canto, sem on-top.
   final ctrl = WindowController.fromWindowId(kWindowId!);
-  try { await ctrl.setFrame(const Rect.fromLTWH(0, 0, 320, 140)); } catch (_) {}
   try { await ctrl.setTitle('ConectDesk'); } catch (_) {}
-  // alwaysOnTop / skipTaskbar / hasShadow não estão expostos no fork do
-  // desktop_multi_window. Usamos `windowManager` (singleton da janela atual em sub-windows
-  // do package window_manager) — funciona porque ambos packages anexam à mesma janela.
-  // Ainda perde pra apps em fullscreen exclusivo (jogos/players DirectX) — limitação OS.
-  try { await windowManager.setAlwaysOnTop(true); } catch (_) {}
-  try { await windowManager.setSkipTaskbar(true); } catch (_) {}
-  try { await windowManager.setHasShadow(false); } catch (_) {}
   // Posiciona canto inferior direito da tela primária.
   try {
     final screens = await window_size.getScreenList();
@@ -327,6 +319,8 @@ void runCdWidgetWindow() async {
       final x = frame.right - 320 - 16;
       final y = frame.bottom - 140 - 16;
       await ctrl.setFrame(Rect.fromLTWH(x, y, 320, 140));
+    } else {
+      await ctrl.setFrame(const Rect.fromLTWH(0, 0, 320, 140));
     }
   } catch (_) {}
   try { await ctrl.show(); } catch (_) {}

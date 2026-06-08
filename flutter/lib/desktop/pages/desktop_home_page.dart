@@ -51,6 +51,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
   bool isCardClosed = false;
+  bool _cdWidgetOpen = false; // ConectDesk: widget canto aberto? (spawn só durante sessão)
 
   final RxBool _editHover = false.obs;
   final RxBool _block = false.obs;
@@ -736,15 +737,22 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   void initState() {
     super.initState();
-    // ConectDesk: widget canto DESABILITADO temporariamente — spawn da sub-window no boot
-    // estava criando uma janela branca extra e atrapalhando a conexão da janela principal
-    // (ensureInitialized numa sub-window conflita com o main window manager). Re-ativar só
-    // depois de isolar num WindowType próprio que não toque no windowManager singleton.
-    // Future.delayed(const Duration(milliseconds: 800), () async {
-    //   try { await rustDeskWinManager.showCdWidget(); } catch (_) {}
-    // });
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
+      // ConectDesk: widget canto aparece SÓ durante sessão (técnico conectado) e some em idle —
+      // evita 2 janelas o tempo todo. runCdWidgetWindow usa só WindowController (não mexe no
+      // windowManager singleton da main, que era o que deixava janela branca).
+      try {
+        final hasSession = gFFI.serverModel.clients
+            .any((c) => c.authorized && !c.disconnected);
+        if (hasSession && !_cdWidgetOpen) {
+          _cdWidgetOpen = true;
+          await rustDeskWinManager.showCdWidget();
+        } else if (!hasSession && _cdWidgetOpen) {
+          _cdWidgetOpen = false;
+          await rustDeskWinManager.closeCdWidget();
+        }
+      } catch (_) {}
       final error = await bind.mainGetError();
       if (systemError != error) {
         systemError = error;
