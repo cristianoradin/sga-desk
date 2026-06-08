@@ -186,7 +186,16 @@ fn main() {
         }
         i += 1;
     }
-    let click_setup = args.is_empty() && arg_exe.to_lowercase().ends_with("install.exe");
+    // ConectDesk: detecta "install" em QUALQUER parte do nome (não só sufixo exato). O navegador
+    // renomeia downloads repetidos pra "ConectDesk-Install (1).exe" → ends_with("install.exe")
+    // falhava e o portable abria como app em vez de instalar o serviço. contains("install") cobre
+    // todas as variações. "Setup" (portable, não instala) não contém "install" → segue como app.
+    let fname = std::path::Path::new(&arg_exe)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let click_setup = args.is_empty() && fname.contains("install");
     #[cfg(windows)]
     let quick_support = args.is_empty() && win::is_quick_support_exe(&arg_exe);
     #[cfg(not(windows))]
