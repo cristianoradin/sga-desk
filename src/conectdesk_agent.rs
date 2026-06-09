@@ -75,6 +75,21 @@ fn agent_version() -> &'static str { env!("CARGO_PKG_VERSION") }
 fn saved_token() -> String { Config::get_option(TOKEN_KEY) }
 fn save_token(t: &str) { Config::set_option(TOKEN_KEY.to_string(), t.to_string()); }
 
+// Diretório compartilhado pra arquivos que o agent (SYSTEM) grava E a UI/widget (usuário) lê:
+// foto do técnico, logo de branding. No Windows = C:\ProgramData\ConectDesk (world-readable);
+// LOCALAPPDATA do SYSTEM (systemprofile) NÃO é acessível pelo usuário logado.
+fn cd_shared_dir() -> std::path::PathBuf {
+    let base = if cfg!(target_os = "windows") {
+        std::env::var_os("PROGRAMDATA")
+            .or_else(|| std::env::var_os("ALLUSERSPROFILE"))
+            .map(std::path::PathBuf::from)
+    } else {
+        Some(std::path::PathBuf::from("/var/lib"))
+    };
+    base.map(|d| d.join("ConectDesk"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ConectDesk"))
+}
+
 // Last applied approve-mode (so we only set when it changes — avoids spamming Config writes).
 static mut LAST_APPROVE: Option<bool> = None;
 
@@ -529,17 +544,8 @@ async fn sync_branding(token: &str) {
         _ => return,
     };
 
-    // %LOCALAPPDATA%\ConectDesk on Windows, $XDG_CONFIG_HOME/ConectDesk or ~/.config/ConectDesk
-    // on Linux, fallback to %TEMP%\ConectDesk. Avoid the extra `dirs` crate dependency.
-    let base_dir = if cfg!(target_os = "windows") {
-        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-    };
-    let dir = base_dir
-        .map(|d| d.join("ConectDesk"))
-        .unwrap_or_else(|| std::env::temp_dir().join("ConectDesk"));
+    // ProgramData (world-readable) — mesmo motivo da foto: agent=SYSTEM grava, widget=user lê.
+    let dir = cd_shared_dir();
     if std::fs::create_dir_all(&dir).is_err() { return; }
     let path = dir.join("branding.png");
     if std::fs::write(&path, &bytes).is_err() { return; }
@@ -579,15 +585,10 @@ async fn sync_active_session_photo(token: &str, session_id: &str, tech_name: &st
         None => { log::warn!("ConectDesk: tech photo base64 inválido"); return; }
     };
 
-    let base_dir = if cfg!(target_os = "windows") {
-        std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from)
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-    };
-    let dir = base_dir
-        .map(|d| d.join("ConectDesk"))
-        .unwrap_or_else(|| std::env::temp_dir().join("ConectDesk"));
+    // Grava em ProgramData (world-readable): o agent roda como SYSTEM e gravava em
+    // LOCALAPPDATA\systemprofile, que a janela do widget (rodando como o usuário logado) NÃO
+    // conseguia ler → foto nunca aparecia. ProgramData é acessível por SYSTEM e por qualquer user.
+    let dir = cd_shared_dir();
     if std::fs::create_dir_all(&dir).is_err() { return; }
     let path = dir.join("session_tech.png");
     if std::fs::write(&path, &bytes).is_err() { return; }

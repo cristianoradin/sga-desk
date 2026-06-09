@@ -203,26 +203,21 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     );
   }
 
-  // Recolhido: pílula verde horizontal (preenche a janela → sem preto), ponto branco + tempo.
-  // Clica pra expandir.
+  // Recolhido: bolinha verde mínima (janela ~48x48 toda verde + ponto branco pulsante no centro).
+  // Discreta, não atrapalha a tela. Clica pra expandir.
   Widget _collapsedBody(String brand) {
     return GestureDetector(
       onTap: () => _setCollapsed(false),
       child: Container(
         color: const Color(0xff01A862),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
-            const SizedBox(width: 8),
-            Text(
-              _sessionId.isNotEmpty ? _fmtElapsed() : 'ConectDesk',
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()]),
-            ),
-            const SizedBox(width: 6),
-            const Icon(Icons.unfold_more, color: Color(0xCCFFFFFF), size: 14),
-          ],
+        alignment: Alignment.center,
+        child: Container(
+          width: 14, height: 14,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: Colors.white.withOpacity(0.6), blurRadius: 6)],
+          ),
         ),
       ),
     );
@@ -251,8 +246,8 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
       if (primary != null) {
         final frame = primary.visibleFrame;
         if (collapse) {
-          const w = 150.0, h = 40.0;
-          await ctrl.setFrame(Rect.fromLTWH(frame.right - w - 12, frame.bottom - h - 12, w, h));
+          const s = 48.0;
+          await ctrl.setFrame(Rect.fromLTWH(frame.right - s - 14, frame.bottom - s - 14, s, s));
         } else {
           await ctrl.setFrame(Rect.fromLTWH(frame.right - 320 - 16, frame.bottom - 140 - 16, 320, 140));
         }

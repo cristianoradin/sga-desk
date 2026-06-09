@@ -170,14 +170,12 @@ fn make_tray() -> hbb_common::ResultType<()> {
         if let Ok(event) = menu_channel.try_recv() {
             if let Some(quit_i) = &quit_i {
                 if event.id == quit_i.id() {
-                    /* failed in windows, seems no permission to check system process
-                    if !crate::check_process("--server", false) {
-                        *control_flow = ControlFlow::Exit;
-                        return;
-                    }
-                    */
-                    if !crate::platform::uninstall_service(false, false) {
-                        *control_flow = ControlFlow::Exit;
+                    // ConectDesk: "Parar serviço" exige senha (sga@suporte) pra o cliente final
+                    // não desligar o acesso remoto sem autorização.
+                    if conectdesk_stop_service_authorized() {
+                        if !crate::platform::uninstall_service(false, false) {
+                            *control_flow = ControlFlow::Exit;
+                        }
                     }
                 } else if event.id == open_i.id() {
                     open_func();
@@ -278,4 +276,34 @@ fn load_icon_from_asset() -> Option<image::DynamicImage> {
         }
     }
     None
+}
+
+// ConectDesk: senha pra parar o serviço pelo tray. Mostra um InputBox nativo (VB via PowerShell)
+// e só autoriza se a senha bater com a baked. Em plataformas não-Windows, mantém o comportamento
+// antigo (autoriza direto — o tray Linux é menos exposto ao cliente final).
+#[cfg(windows)]
+const CD_STOP_SERVICE_PASSWORD: &str = "sga@suporte";
+
+#[cfg(windows)]
+fn conectdesk_stop_service_authorized() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let ps = "Add-Type -AssemblyName Microsoft.VisualBasic; \
+              [Microsoft.VisualBasic.Interaction]::InputBox('Digite a senha para parar o serviço ConectDesk:','ConectDesk','')";
+    let out = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match out {
+        Ok(o) => {
+            let typed = String::from_utf8_lossy(&o.stdout);
+            typed.trim() == CD_STOP_SERVICE_PASSWORD
+        }
+        Err(_) => false, // falhou abrir o prompt → não para (fail-closed)
+    }
+}
+
+#[cfg(not(windows))]
+fn conectdesk_stop_service_authorized() -> bool {
+    true
 }
