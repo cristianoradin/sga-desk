@@ -110,14 +110,14 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
             child: ScaleTransition(
               scale: Tween<double>(begin: 0.92, end: 1.0).animate(_fadeAnim),
               child: Container(
-            margin: const EdgeInsets.all(6),
+            margin: const EdgeInsets.all(4),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
                 begin: Alignment.topLeft, end: Alignment.bottomRight,
                 colors: [Color(0xff0A6A3A), Color(0xff01A862)],
               ),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 4))],
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 10, offset: const Offset(0, 3))],
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),

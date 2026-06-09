@@ -311,6 +311,10 @@ void runCdWidgetWindow(Map<String, dynamic> argument) async {
   );
   final ctrl = WindowController.fromWindowId(kWindowId!);
   try { await ctrl.setTitle('ConectDesk'); } catch (_) {}
+  // Fundo da janela transparente — sem isto a sub-window fica com fundo preto opaco atrás do
+  // card verde (e um quadrado preto ao redor da bolinha recolhida). setBackgroundColor é seguro
+  // (≠ ensureInitialized, que era o que deixava branco).
+  try { await windowManager.setBackgroundColor(Colors.transparent); } catch (_) {}
   // Posiciona canto inferior direito da tela primária.
   try {
     final screens = await window_size.getScreenList();
