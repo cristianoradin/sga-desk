@@ -51,7 +51,6 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
   bool isCardClosed = false;
-  bool _cdWidgetOpen = false; // ConectDesk: widget canto aberto? (spawn só durante sessão)
 
   final RxBool _editHover = false.obs;
   final RxBool _block = false.obs;
@@ -739,20 +738,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     super.initState();
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
-      // ConectDesk: widget canto aparece SÓ durante sessão (técnico conectado) e some em idle —
-      // evita 2 janelas o tempo todo. runCdWidgetWindow usa só WindowController (não mexe no
-      // windowManager singleton da main, que era o que deixava janela branca).
-      try {
-        final hasSession = gFFI.serverModel.clients
-            .any((c) => c.authorized && !c.disconnected);
-        if (hasSession && !_cdWidgetOpen) {
-          _cdWidgetOpen = true;
-          await rustDeskWinManager.showCdWidget();
-        } else if (!hasSession && _cdWidgetOpen) {
-          _cdWidgetOpen = false;
-          await rustDeskWinManager.closeCdWidget();
-        }
-      } catch (_) {}
+      // ConectDesk: o widget canto agora é gerenciado pelo processo CM (server_model), que
+      // sempre roda durante a sessão — não depende desta janela principal estar aberta.
       final error = await bind.mainGetError();
       if (systemError != error) {
         systemError = error;

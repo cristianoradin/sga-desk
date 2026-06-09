@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../common.dart';
 import '../common/formatter/id_formatter.dart';
+import '../utils/multi_window_manager.dart';
 import '../desktop/pages/server_page.dart' as desktop;
 import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
@@ -164,6 +165,8 @@ class ServerModel with ChangeNotifier {
         } else {
           if (_clients.isEmpty) {
             hideCmWindow();
+            // ConectDesk: sem sessão → fecha o widget canto.
+            try { rustDeskWinManager.closeCdWidget(); } catch (_) {}
             if (_zeroClientLengthCounter++ == 12) {
               // 6 second
               windowManager.close();
@@ -171,14 +174,17 @@ class ServerModel with ChangeNotifier {
           } else {
             _zeroClientLengthCounter = 0;
             // ConectDesk: CM visível SÓ enquanto há cliente pendente de aprovação. Depois de
-            // autorizar, esconde o CM — o card "técnico em atendimento" embutido na janela
-            // principal (desktop_home_page) assume. Evita a janela CM separada durante a sessão.
+            // autorizar, esconde o CM e abre o WIDGET de canto (foto técnico + logo + nome) —
+            // ele vira a única UI da sessão, sem depender da janela principal estar aberta.
             final hasPending =
                 _clients.any((c) => !c.authorized && !c.disconnected);
             if (hasPending && !hideCm) {
               showCmWindow();
+              try { rustDeskWinManager.closeCdWidget(); } catch (_) {}
             } else {
               hideCmWindow();
+              // Sessão autorizada em curso → mostra o widget canto.
+              try { rustDeskWinManager.showCdWidget(); } catch (_) {}
             }
           }
         }
