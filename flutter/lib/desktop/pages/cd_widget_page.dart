@@ -33,6 +33,7 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   DateTime? _sessionStart; // marcado quando uma sessão nova aparece (≈ início real)
   Duration _elapsed = Duration.zero;
   bool _collapsed = false;
+  int _photoTag = 0; // mtime^size do session_tech.png — força re-load do Image quando a foto chega
   late final AnimationController _fade;
   late final Animation<double> _fadeAnim;
 
@@ -72,9 +73,19 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     final s = bind.mainGetOptionSync(key: 'cd_active_session_id');
     final bn = bind.mainGetOptionSync(key: 'cd_brand_name');
     final bp = bind.mainGetOptionSync(key: 'cd_brand_logo_path');
+    // O path da foto é sempre o mesmo arquivo (session_tech.png) — o agent o cria DEPOIS que o
+    // widget abriu, então o option não muda. Checamos mtime+size do arquivo pra re-renderizar a
+    // imagem quando ela finalmente chega (cache-bust via _photoTag).
+    int photoStamp = 0;
+    if (p.isNotEmpty) {
+      try { final st = File(p).statSync(); photoStamp = st.modified.millisecondsSinceEpoch ^ st.size; } catch (_) {}
+    }
     if (n != _techName || p != _techPhotoPath || s != _sessionId ||
-        bn != _brandName || bp != _brandLogoPath) {
-      // Sessão nova (id mudou pra não-vazio) → começa a contar o tempo.
+        bn != _brandName || bp != _brandLogoPath || photoStamp != _photoTag) {
+      // Foto mudou no disco → tira do cache do Flutter pra Image.file re-ler (senão serve a velha).
+      if (photoStamp != _photoTag && p.isNotEmpty) {
+        try { FileImage(File(p)).evict(); } catch (_) {}
+      }
       if (s.isNotEmpty && s != _sessionId) {
         _sessionStart = DateTime.now();
         _elapsed = Duration.zero;
@@ -84,7 +95,7 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
       }
       setState(() {
         _techName = n; _techPhotoPath = p; _sessionId = s;
-        _brandName = bn; _brandLogoPath = bp;
+        _brandName = bn; _brandLogoPath = bp; _photoTag = photoStamp;
       });
     }
   }
@@ -93,16 +104,18 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final hasSession = _sessionId.isNotEmpty;
     final brand = _brandName.isNotEmpty ? _brandName : 'SGA Petro';
-    // Recolhido: só a bolinha (sem o card verde atrás), janela 72x72 colada à direita.
+    // Sub-window do Windows NÃO é transparente (sem WS_EX_LAYERED no runner), então usamos
+    // o próprio verde como fundo da janela — os cantos arredondados somem no verde em vez de
+    // mostrar preto. Recolhido = pílula verde horizontal (não bolinha branca, que exigiria
+    // transparência real).
     if (_collapsed) {
       return Scaffold(
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xff01A862),
         body: _collapsedBody(brand),
       );
     }
-    // Sem MaterialApp aqui: runCdWidgetWindow já roda via _runApp → GetMaterialApp.
     return Scaffold(
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xff0A6A3A),
         body: GestureDetector(
           onPanStart: (_) async { try { await windowManager.startDragging(); } catch (_) {} },
           child: FadeTransition(
@@ -110,14 +123,11 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
             child: ScaleTransition(
               scale: Tween<double>(begin: 0.92, end: 1.0).animate(_fadeAnim),
               child: Container(
-            margin: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
                 begin: Alignment.topLeft, end: Alignment.bottomRight,
                 colors: [Color(0xff0A6A3A), Color(0xff01A862)],
               ),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 10, offset: const Offset(0, 3))],
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -193,28 +203,26 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     );
   }
 
-  // Recolhido: janela vira uma bolinha 64x64 (círculo branco + ponto verde pulsante) no canto
-  // direito — sinal discreto de "conectado". Clica pra expandir de volta.
+  // Recolhido: pílula verde horizontal (preenche a janela → sem preto), ponto branco + tempo.
+  // Clica pra expandir.
   Widget _collapsedBody(String brand) {
-    return Center(
-      child: GestureDetector(
-        onTap: () => _setCollapsed(false),
-        child: Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 8)],
-          ),
-          alignment: Alignment.center,
-          child: Container(
-            width: 16, height: 16,
-            decoration: const BoxDecoration(
-              color: Color(0xff01A862),
-              shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: Color(0x8001A862), blurRadius: 8)],
+    return GestureDetector(
+      onTap: () => _setCollapsed(false),
+      child: Container(
+        color: const Color(0xff01A862),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(width: 10, height: 10, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+            const SizedBox(width: 8),
+            Text(
+              _sessionId.isNotEmpty ? _fmtElapsed() : 'ConectDesk',
+              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()]),
             ),
-          ),
+            const SizedBox(width: 6),
+            const Icon(Icons.unfold_more, color: Color(0xCCFFFFFF), size: 14),
+          ],
         ),
       ),
     );
@@ -243,8 +251,8 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
       if (primary != null) {
         final frame = primary.visibleFrame;
         if (collapse) {
-          const s = 72.0;
-          await ctrl.setFrame(Rect.fromLTWH(frame.right - s - 8, frame.bottom - s - 8, s, s));
+          const w = 150.0, h = 40.0;
+          await ctrl.setFrame(Rect.fromLTWH(frame.right - w - 12, frame.bottom - h - 12, w, h));
         } else {
           await ctrl.setFrame(Rect.fromLTWH(frame.right - 320 - 16, frame.bottom - 140 - 16, 320, 140));
         }
@@ -266,7 +274,8 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
       clipBehavior: Clip.antiAlias,
       alignment: Alignment.center,
       child: hasPhoto
-          ? Image.file(f!, fit: BoxFit.cover, width: size, height: size,
+          ? Image.file(f!, key: ValueKey(_photoTag), fit: BoxFit.cover, width: size, height: size,
+              gaplessPlayback: true,
               errorBuilder: (_, __, ___) => Text(initial, style: TextStyle(color: Colors.white, fontSize: size * 0.45, fontWeight: FontWeight.w800)))
           : Text(initial, style: TextStyle(color: Colors.white, fontSize: size * 0.45, fontWeight: FontWeight.w800)),
     );
