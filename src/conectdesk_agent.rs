@@ -44,6 +44,9 @@ const BRAND_LOGO_PATH_KEY: &str = "cd_brand_logo_path";
 const ACTIVE_SESSION_ID_KEY: &str = "cd_active_session_id";
 const ACTIVE_SESSION_TECH_NAME_KEY: &str = "cd_active_session_tech_name";
 const ACTIVE_SESSION_TECH_PHOTO_PATH_KEY: &str = "cd_active_session_tech_photo_path";
+// Multi-técnico: JSON array [{name, photoPath}] de TODOS os técnicos conectados. Widget mostra
+// todos. cd_active_session_tech_name/_photo_path continuam = o primeiro (compat 1-técnico).
+const ACTIVE_SESSIONS_JSON_KEY: &str = "cd_active_sessions";
 // Histórico de sessões — JSON array salvo em option pra Flutter ler sem HTTP. Refresh
 // a cada SESSION_HISTORY_INTERVAL_SECS via sync_session_history().
 const SESSION_HISTORY_KEY: &str = "cd_session_history";
@@ -554,52 +557,62 @@ async fn sync_branding(token: &str) {
     log::info!("ConectDesk branding: sync ok ({} bytes, updated_at={})", bytes.len(), updated_at);
 }
 
-// Sincroniza foto + nome do técnico da sessão ativa. Chamada SOMENTE quando heartbeat
-// retorna activeSession.id != ao último salvo (evita re-download a cada 30s).
-async fn sync_active_session_photo(token: &str, session_id: &str, tech_name: &str) {
-    // Persiste id + nome imediatamente (Flutter mostra nome mesmo se download falhar).
-    Config::set_option(ACTIVE_SESSION_ID_KEY.to_string(), session_id.to_string());
-    Config::set_option(ACTIVE_SESSION_TECH_NAME_KEY.to_string(), tech_name.to_string());
+// Sincroniza TODOS os técnicos conectados (multi-técnico). Baixa /photos, grava uma foto por
+// sessão (session_tech_<id8>.png em ProgramData) e monta um JSON [{name, photoPath}] que o widget
+// consome. Mantém cd_active_session_tech_name/_photo_path = o primeiro técnico (compat 1-técnico).
+async fn sync_active_sessions(token: &str, stamp: &str) {
+    Config::set_option(ACTIVE_SESSION_ID_KEY.to_string(), stamp.to_string());
 
     let Some(base) = api_base() else { return };
-    let Some(client) = http_client(15) else { return };
-    let url = format!("{}/api/agents/me/active-session/photo", base);
+    let Some(client) = http_client(20) else { return };
+    let url = format!("{}/api/agents/me/active-session/photos", base);
     let resp = match client.get(&url).bearer_auth(token).send().await {
         Ok(r) if r.status().is_success() => r,
         _ => return,
     };
     let v: Value = match resp.json().await { Ok(v) => v, Err(_) => return };
-    let photo = v.get("photo").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    if photo.is_empty() {
-        Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), String::new());
-        return;
+    let sessions = match v.get("sessions").and_then(|x| x.as_array()) {
+        Some(a) => a,
+        None => return,
+    };
+
+    let dir = cd_shared_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let mut out: Vec<Value> = Vec::new();
+    let mut first_name = String::new();
+    let mut first_photo = String::new();
+    for s in sessions.iter() {
+        let sid = s.get("sessionId").and_then(|x| x.as_str()).unwrap_or("");
+        let name = s.get("technician").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let photo = s.get("photo").and_then(|x| x.as_str()).unwrap_or("");
+        let mut photo_path = String::new();
+        if !photo.is_empty() {
+            let b64 = match photo.split_once("base64,") { Some((_, r)) => r.trim(), None => photo.trim() };
+            if let Some(bytes) = base64_decode(b64) {
+                // id8 = 8 primeiros chars do sessionId pra nome de arquivo curto e estável.
+                let id8: String = sid.chars().take(8).filter(|c| c.is_alphanumeric()).collect();
+                let p = dir.join(format!("session_tech_{}.png", id8));
+                if std::fs::write(&p, &bytes).is_ok() {
+                    photo_path = p.to_string_lossy().to_string();
+                }
+            }
+        }
+        if first_name.is_empty() { first_name = name.clone(); first_photo = photo_path.clone(); }
+        out.push(json!({"name": name, "photoPath": photo_path}));
     }
 
-    // photo é data URL "data:image/png;base64,..." OU base64 puro.
-    let b64 = match photo.split_once("base64,") {
-        Some((_, rest)) => rest.trim().to_string(),
-        None => photo.trim().to_string(),
-    };
-    let bytes = match base64_decode(&b64) {
-        Some(b) => b,
-        None => { log::warn!("ConectDesk: tech photo base64 inválido"); return; }
-    };
-
-    // Grava em ProgramData (world-readable): o agent roda como SYSTEM e gravava em
-    // LOCALAPPDATA\systemprofile, que a janela do widget (rodando como o usuário logado) NÃO
-    // conseguia ler → foto nunca aparecia. ProgramData é acessível por SYSTEM e por qualquer user.
-    let dir = cd_shared_dir();
-    if std::fs::create_dir_all(&dir).is_err() { return; }
-    let path = dir.join("session_tech.png");
-    if std::fs::write(&path, &bytes).is_err() { return; }
-    Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), path.to_string_lossy().to_string());
-    log::info!("ConectDesk: tech photo gravada ({} bytes) session={}", bytes.len(), session_id);
+    let json_str = serde_json::to_string(&out).unwrap_or("[]".into());
+    Config::set_option(ACTIVE_SESSIONS_JSON_KEY.to_string(), json_str);
+    Config::set_option(ACTIVE_SESSION_TECH_NAME_KEY.to_string(), first_name);
+    Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), first_photo);
+    log::info!("ConectDesk: {} técnico(s) ativo(s) sincronizado(s)", out.len());
 }
 
 fn clear_active_session() {
     Config::set_option(ACTIVE_SESSION_ID_KEY.to_string(), String::new());
     Config::set_option(ACTIVE_SESSION_TECH_NAME_KEY.to_string(), String::new());
     Config::set_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY.to_string(), String::new());
+    Config::set_option(ACTIVE_SESSIONS_JSON_KEY.to_string(), String::new());
 }
 
 // Histórico de sessões — GET /api/agents/me/sessions retorna últimas 50 sessões.
@@ -719,25 +732,27 @@ pub fn start() {
                         log::info!("ConectDesk: requestUpdate=true do painel — disparando update");
                         maybe_update().await;
                     }
-                    // Sessão ativa: detecta nova ou fim. Quando muda id, baixa foto. Quando some, limpa.
-                    match resp.get("activeSession") {
-                        Some(s) if !s.is_null() => {
-                            let new_id = s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let new_name = s.get("technician").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let last_id = Config::get_option(ACTIVE_SESSION_ID_KEY);
-                            // Re-tenta baixar a foto enquanto não tiver: sessão nova OU ainda sem
-                            // foto local (o endpoint pode passar a ter a foto via fallback
-                            // panel_users num heartbeat seguinte).
-                            let has_photo = !Config::get_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY).is_empty();
-                            if !new_id.is_empty() && (new_id != last_id || !has_photo) {
-                                sync_active_session_photo(&token, &new_id, &new_name).await;
-                            }
+                    // Sessões ativas (multi-técnico): mostra TODOS os técnicos conectados.
+                    // Usa activeSessions (lista); cai pra activeSession (singular) em servidores
+                    // antigos. Quando há sessões, ressincroniza nomes+fotos; quando some, limpa.
+                    let sessions_list = resp.get("activeSessions").and_then(|v| v.as_array());
+                    let has_any = match (sessions_list, resp.get("activeSession")) {
+                        (Some(a), _) => !a.is_empty(),
+                        (None, Some(s)) => !s.is_null(),
+                        _ => false,
+                    };
+                    if has_any {
+                        // Re-sincroniza enquanto algum técnico ainda não tem foto local.
+                        let stamp = sessions_list
+                            .map(|a| a.iter().filter_map(|s| s.get("id").and_then(|v| v.as_str())).collect::<Vec<_>>().join(","))
+                            .unwrap_or_else(|| resp.get("activeSession").and_then(|s| s.get("id")).and_then(|v| v.as_str()).unwrap_or("").to_string());
+                        let last_stamp = Config::get_option(ACTIVE_SESSION_ID_KEY);
+                        let has_photos = !Config::get_option(ACTIVE_SESSIONS_JSON_KEY).is_empty();
+                        if !stamp.is_empty() && (stamp != last_stamp || !has_photos) {
+                            sync_active_sessions(&token, &stamp).await;
                         }
-                        _ => {
-                            if !Config::get_option(ACTIVE_SESSION_ID_KEY).is_empty() {
-                                clear_active_session();
-                            }
-                        }
+                    } else if !Config::get_option(ACTIVE_SESSION_ID_KEY).is_empty() {
+                        clear_active_session();
                     }
                 }
                 None => {

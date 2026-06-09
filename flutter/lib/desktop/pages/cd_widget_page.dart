@@ -6,6 +6,7 @@
 // Lê options atualizados pelo agent (cd_active_session_*, cd_brand_*) via mainGetOptionSync,
 // repolling a cada 1.5s pra capturar mudanças (não há sinal push pra sub-window).
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show FontFeature;
 
@@ -34,6 +35,7 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   Duration _elapsed = Duration.zero;
   bool _collapsed = false;
   int _photoTag = 0; // mtime^size do session_tech.png — força re-load do Image quando a foto chega
+  List<Map<String, String>> _techs = []; // multi-técnico: [{name, photoPath}]
   late final AnimationController _fade;
   late final Animation<double> _fadeAnim;
 
@@ -73,6 +75,25 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     final s = bind.mainGetOptionSync(key: 'cd_active_session_id');
     final bn = bind.mainGetOptionSync(key: 'cd_brand_name');
     final bp = bind.mainGetOptionSync(key: 'cd_brand_logo_path');
+    // Multi-técnico: lista completa de técnicos conectados.
+    final raw = bind.mainGetOptionSync(key: 'cd_active_sessions');
+    List<Map<String, String>> techs = [];
+    if (raw.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(raw);
+        if (parsed is List) {
+          techs = parsed.map<Map<String, String>>((e) => {
+            'name': (e['name'] ?? '').toString(),
+            'photoPath': (e['photoPath'] ?? '').toString(),
+          }).toList();
+        }
+      } catch (_) {}
+    }
+    if (techs.length != _techs.length ||
+        techs.asMap().entries.any((e) => _techs.length <= e.key || _techs[e.key]['name'] != e.value['name'] || _techs[e.key]['photoPath'] != e.value['photoPath'])) {
+      _techs = techs;
+      if (mounted) setState(() {});
+    }
     // O path da foto é sempre o mesmo arquivo (session_tech.png) — o agent o cria DEPOIS que o
     // widget abriu, então o option não muda. Checamos mtime+size do arquivo pra re-renderizar a
     // imagem quando ela finalmente chega (cache-bust via _photoTag).
@@ -168,30 +189,64 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   }
 
   Widget _sessionBody(String brand) {
-    final techDisplay = _techName.isNotEmpty ? _techName : 'Técnico';
+    // 2+ técnicos: layout multi (avatares empilhados + nomes). 1 ou 0: layout single.
+    final multi = _techs.length > 1;
+    final Widget left;
+    final Widget info;
+    if (multi) {
+      // Avatares sobrepostos (até 3 visíveis).
+      final shown = _techs.take(3).toList();
+      left = SizedBox(
+        width: 56, height: 56,
+        child: Stack(
+          children: [
+            for (int i = 0; i < shown.length; i++)
+              Positioned(
+                left: i * 16.0,
+                top: i * 6.0,
+                child: _avatarFor(shown[i]['name'] ?? '', shown[i]['photoPath'] ?? '', 36),
+              ),
+          ],
+        ),
+      );
+      final names = _techs.map((t) => t['name'] ?? '').where((s) => s.isNotEmpty).join(', ');
+      info = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${_techs.length} técnicos', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(names, style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 4),
+          Text('Em atendimento · ${_fmtElapsed()}', style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 11, fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()])),
+        ],
+      );
+    } else {
+      final techDisplay = _techName.isNotEmpty ? _techName : 'Técnico';
+      left = _techAvatar(56);
+      info = Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(techDisplay, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text('Técnico $brand', style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11), overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 6),
+          Row(children: [
+            Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xff7CFF9C), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x807CFF9C), blurRadius: 6)])),
+            const SizedBox(width: 6),
+            const Text('Em atendimento', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+          ]),
+          const SizedBox(height: 2),
+          Text(_fmtElapsed(), style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 13, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
+        ],
+      );
+    }
     return Row(
       children: [
-        _techAvatar(56),
+        left,
         const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(techDisplay, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 2),
-              Text('Técnico $brand', style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11), overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 6),
-              Row(children: [
-                Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xff7CFF9C), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x807CFF9C), blurRadius: 6)])),
-                const SizedBox(width: 6),
-                const Text('Em atendimento', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-              ]),
-              const SizedBox(height: 2),
-              Text(_fmtElapsed(), style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 13, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
-            ],
-          ),
-        ),
+        Expanded(child: info),
         Column(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -200,6 +255,27 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
           ],
         ),
       ],
+    );
+  }
+
+  // Avatar de um técnico arbitrário (multi). Foto se houver, senão inicial.
+  Widget _avatarFor(String name, String photoPath, double size) {
+    final f = photoPath.isNotEmpty ? File(photoPath) : null;
+    final hasPhoto = f != null && f.existsSync();
+    final initial = name.isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    return Container(
+      width: size, height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xff0A6A3A),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      alignment: Alignment.center,
+      child: hasPhoto
+          ? Image.file(f!, key: ValueKey('$photoPath$_photoTag'), fit: BoxFit.cover, width: size, height: size, gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => Text(initial, style: TextStyle(color: Colors.white, fontSize: size * 0.45, fontWeight: FontWeight.w800)))
+          : Text(initial, style: TextStyle(color: Colors.white, fontSize: size * 0.45, fontWeight: FontWeight.w800)),
     );
   }
 
