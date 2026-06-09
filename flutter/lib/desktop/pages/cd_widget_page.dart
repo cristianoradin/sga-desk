@@ -7,13 +7,17 @@
 // repolling a cada 1.5s pra capturar mudanças (não há sinal push pra sub-window).
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show FontFeature;
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:window_size/window_size.dart' as window_size;
 
 class CdWidgetPage extends StatefulWidget {
-  const CdWidgetPage({Key? key}) : super(key: key);
+  final int windowId;
+  const CdWidgetPage({Key? key, required this.windowId}) : super(key: key);
   @override
   State<CdWidgetPage> createState() => _CdWidgetPageState();
 }
@@ -89,8 +93,14 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final hasSession = _sessionId.isNotEmpty;
     final brand = _brandName.isNotEmpty ? _brandName : 'SGA Petro';
-    // Sem MaterialApp aqui: runCdWidgetWindow já roda via _runApp → GetMaterialApp. Ter um
-    // MaterialApp aninhado deixava o widget renderizar BRANCO (dois MaterialApp empilhados).
+    // Recolhido: só a bolinha (sem o card verde atrás), janela 72x72 colada à direita.
+    if (_collapsed) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: _collapsedBody(brand),
+      );
+    }
+    // Sem MaterialApp aqui: runCdWidgetWindow já roda via _runApp → GetMaterialApp.
     return Scaffold(
         backgroundColor: Colors.transparent,
         body: GestureDetector(
@@ -110,10 +120,8 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 4))],
             ),
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: _collapsed ? 12 : 14, vertical: _collapsed ? 8 : 12),
-              child: _collapsed
-                  ? _collapsedBody(brand)
-                  : (hasSession ? _sessionBody(brand) : _idleBody(brand)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: hasSession ? _sessionBody(brand) : _idleBody(brand),
             ),
           ),
         ),
@@ -167,8 +175,10 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
               Row(children: [
                 Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xff7CFF9C), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x807CFF9C), blurRadius: 6)])),
                 const SizedBox(width: 6),
-                Text('Em atendimento · ${_fmtElapsed()}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                const Text('Em atendimento', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
               ]),
+              const SizedBox(height: 2),
+              Text(_fmtElapsed(), style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 13, fontWeight: FontWeight.w800, fontFeatures: [FontFeature.tabularFigures()])),
             ],
           ),
         ),
@@ -176,39 +186,43 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             _collapseBtn(),
-            _brandLogo(32),
+            _brandLogo(30),
           ],
         ),
       ],
     );
   }
 
-  // Pílula recolhida: só logo + tempo, bem pequena. Clica pra expandir.
+  // Recolhido: janela vira uma bolinha 64x64 (círculo branco + ponto verde pulsante) no canto
+  // direito — sinal discreto de "conectado". Clica pra expandir de volta.
   Widget _collapsedBody(String brand) {
-    return GestureDetector(
-      onTap: () => setState(() => _collapsed = false),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _brandLogo(28),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              _sessionId.isNotEmpty ? 'Em atendimento · ${_fmtElapsed()}' : 'ConectDesk',
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis,
+    return Center(
+      child: GestureDetector(
+        onTap: () => _setCollapsed(false),
+        child: Container(
+          width: 44, height: 44,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 8)],
+          ),
+          alignment: Alignment.center,
+          child: Container(
+            width: 16, height: 16,
+            decoration: const BoxDecoration(
+              color: Color(0xff01A862),
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: Color(0x8001A862), blurRadius: 8)],
             ),
           ),
-          const SizedBox(width: 6),
-          const Icon(Icons.unfold_more, color: Color(0xCCFFFFFF), size: 16),
-        ],
+        ),
       ),
     );
   }
 
   Widget _collapseBtn() {
     return InkWell(
-      onTap: () => setState(() => _collapsed = true),
+      onTap: () => _setCollapsed(true),
       borderRadius: BorderRadius.circular(8),
       child: Container(
         width: 22, height: 22,
@@ -216,6 +230,26 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
         child: const Icon(Icons.unfold_less, color: Color(0xCCFFFFFF), size: 16),
       ),
     );
+  }
+
+  // Redimensiona/reposiciona a própria sub-window: recolhido = bolinha 72x72 colada à direita;
+  // expandido = card 320x140. Usa WindowController.fromWindowId (NÃO o windowManager singleton).
+  Future<void> _setCollapsed(bool collapse) async {
+    setState(() => _collapsed = collapse);
+    try {
+      final screens = await window_size.getScreenList();
+      final primary = screens.isNotEmpty ? screens.first : null;
+      final ctrl = WindowController.fromWindowId(widget.windowId);
+      if (primary != null) {
+        final frame = primary.visibleFrame;
+        if (collapse) {
+          const s = 72.0;
+          await ctrl.setFrame(Rect.fromLTWH(frame.right - s - 8, frame.bottom - s - 8, s, s));
+        } else {
+          await ctrl.setFrame(Rect.fromLTWH(frame.right - 320 - 16, frame.bottom - 140 - 16, 320, 140));
+        }
+      }
+    } catch (_) {}
   }
 
   Widget _techAvatar(double size) {

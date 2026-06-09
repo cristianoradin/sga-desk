@@ -724,7 +724,11 @@ pub fn start() {
                             let new_id = s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             let new_name = s.get("technician").and_then(|v| v.as_str()).unwrap_or("").to_string();
                             let last_id = Config::get_option(ACTIVE_SESSION_ID_KEY);
-                            if !new_id.is_empty() && new_id != last_id {
+                            // Re-tenta baixar a foto enquanto não tiver: sessão nova OU ainda sem
+                            // foto local (o endpoint pode passar a ter a foto via fallback
+                            // panel_users num heartbeat seguinte).
+                            let has_photo = !Config::get_option(ACTIVE_SESSION_TECH_PHOTO_PATH_KEY).is_empty();
+                            if !new_id.is_empty() && (new_id != last_id || !has_photo) {
                                 sync_active_session_photo(&token, &new_id, &new_name).await;
                             }
                         }

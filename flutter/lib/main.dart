@@ -306,7 +306,7 @@ void runCdWidgetWindow(Map<String, dynamic> argument) async {
   WindowController.fromWindowId(kWindowId!).setPreventClose(true);
   _runApp(
     '',
-    const CdWidgetPage(),
+    CdWidgetPage(windowId: kWindowId!),
     MyTheme.currentThemeMode(),
   );
   final ctrl = WindowController.fromWindowId(kWindowId!);
