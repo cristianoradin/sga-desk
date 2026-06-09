@@ -170,7 +170,16 @@ class ServerModel with ChangeNotifier {
             }
           } else {
             _zeroClientLengthCounter = 0;
-            if (!hideCm) showCmWindow();
+            // ConectDesk: CM visível SÓ enquanto há cliente pendente de aprovação. Depois de
+            // autorizar, esconde o CM — o card "técnico em atendimento" embutido na janela
+            // principal (desktop_home_page) assume. Evita a janela CM separada durante a sessão.
+            final hasPending =
+                _clients.any((c) => !c.authorized && !c.disconnected);
+            if (hasPending && !hideCm) {
+              showCmWindow();
+            } else {
+              hideCmWindow();
+            }
           }
         }
       }
