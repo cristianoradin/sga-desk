@@ -413,26 +413,26 @@ class _ConnectionPageState extends State<ConnectionPage>
       Color green,
       {bool mono = false}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 13),
+      padding: const EdgeInsets.symmetric(vertical: 16),
       child: Row(
         children: [
           Container(
-            width: 30,
-            height: 30,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: const Color(0xFFF3F7F5),
-              borderRadius: BorderRadius.circular(9),
+              borderRadius: BorderRadius.circular(11),
             ),
-            child: Icon(ic, size: 17, color: green),
+            child: Icon(ic, size: 22, color: green),
           ),
-          const SizedBox(width: 11),
+          const SizedBox(width: 14),
           Text(label,
               style: TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w600, color: muted)),
+                  fontSize: 16, fontWeight: FontWeight.w600, color: muted)),
           const Spacer(),
           Text(value,
               style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 17,
                   fontWeight: FontWeight.w700,
                   color: ink,
                   fontFamily: mono ? 'monospace' : null,

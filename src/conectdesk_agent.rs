@@ -618,7 +618,7 @@ async fn sync_session_history(token: &str) {
         Some(arr) => arr,
         None => return,
     };
-    let trimmed: Vec<Value> = sessions.iter().take(50).map(|s| {
+    let trimmed: Vec<Value> = sessions.iter().take(15).map(|s| {
         let mut obj = serde_json::Map::new();
         if let Some(x) = s.get("id") { obj.insert("id".into(), x.clone()); }
         if let Some(x) = s.get("technician") { obj.insert("technician".into(), x.clone()); }
