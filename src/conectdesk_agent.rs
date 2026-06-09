@@ -199,7 +199,69 @@ fn collect_sysinfo() -> Value {
             "mac": mac,
             "ip": ip4,
         },
+        "software": {
+            "services": collect_services(),
+            "processes": collect_processes(),
+        },
     })
+}
+
+// Serviços Windows (nome + display + status). O painel mostra + permite parar via watchdog.
+// Limita a ~120 pra não inflar o payload.
+fn collect_services() -> Value {
+    #[cfg(target_os = "windows")]
+    {
+        let ps = "Get-Service | Sort-Object Status,DisplayName | Select-Object -First 200 Name,DisplayName,Status | ConvertTo-Json -Compress";
+        if let Ok(o) = hidden_command("powershell.exe")
+            .args(["-NoProfile", "-Command", ps]).output()
+        {
+            let s = String::from_utf8_lossy(&o.stdout);
+            if let Ok(v) = serde_json::from_str::<Value>(s.trim()) {
+                let arr = if v.is_array() { v } else { json!([v]) };
+                let mut out = vec![];
+                if let Some(items) = arr.as_array() {
+                    for it in items.iter().take(120) {
+                        // Status: 4 = Running, 1 = Stopped (enum serializado como número).
+                        let st = it.get("Status").and_then(|x| x.as_i64()).unwrap_or(0);
+                        out.push(json!({
+                            "name": it.get("Name").and_then(|x| x.as_str()).unwrap_or(""),
+                            "display": it.get("DisplayName").and_then(|x| x.as_str()).unwrap_or(""),
+                            "running": st == 4,
+                        }));
+                    }
+                }
+                return json!(out);
+            }
+        }
+    }
+    json!([])
+}
+
+// Top processos por RAM (nome + MB). tasklist CSV; agrega por nome, ordena desc, top 30.
+fn collect_processes() -> Value {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(o) = hidden_command("tasklist").args(["/FO", "CSV", "/NH"]).output() {
+            let s = String::from_utf8_lossy(&o.stdout);
+            use std::collections::HashMap;
+            let mut agg: HashMap<String, u64> = HashMap::new();
+            for line in s.lines() {
+                // "Image","PID","Session","Session#","MemUsage" — MemUsage tipo "12.345 K".
+                let cols: Vec<String> = line.split("\",\"").map(|c| c.trim_matches('"').to_string()).collect();
+                if cols.len() < 5 { continue; }
+                let name = cols[0].clone();
+                let mem_kb: u64 = cols[4].chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0);
+                *agg.entry(name).or_insert(0) += mem_kb;
+            }
+            let mut v: Vec<(String, u64)> = agg.into_iter().collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1));
+            let out: Vec<Value> = v.into_iter().take(30)
+                .map(|(name, kb)| json!({"name": name, "memMB": kb / 1024}))
+                .collect();
+            return json!(out);
+        }
+    }
+    json!([])
 }
 
 fn collect_disks() -> Value {
