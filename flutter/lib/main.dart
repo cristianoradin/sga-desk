@@ -103,9 +103,11 @@ Future<void> main(List<String> args) async {
         );
         break;
       case WindowType.CdWidget:
-        desktopType = DesktopType.main;
-        await windowManager.ensureInitialized();
-        runCdWidgetWindow();
+        // Sub-window normal (igual remote/file): NÃO setar desktopType.main nem
+        // windowManager.ensureInitialized — isso é setup da janela principal e deixava o
+        // sub-window renderizar branco.
+        runCdWidgetWindow(argument);
+        break;
       default:
         break;
     }
@@ -297,17 +299,16 @@ void runMultiWindow(
 // ConectDesk widget: janela pequena always-on-top no canto inferior direito da tela. Mostra
 // foto técnico + logo cliente + nome quando sessão está ativa; em idle só mostra logo.
 // Conteúdo controlado por CdWidgetPage; size 320x140, sem decoração de janela.
-void runCdWidgetWindow() async {
+void runCdWidgetWindow(Map<String, dynamic> argument) async {
+  // Mesmo padrão de sub-window do runMultiWindow (remote/file). initEnv com appType main + o
+  // setPreventClose via WindowController. Sem windowManager singleton (era o que deixava branco).
   await initEnv(kAppTypeMain);
+  WindowController.fromWindowId(kWindowId!).setPreventClose(true);
   _runApp(
     '',
     const CdWidgetPage(),
     MyTheme.currentThemeMode(),
   );
-  // Sub-window é controlada SÓ por WindowController.fromWindowId — NÃO usar o singleton
-  // windowManager aqui (ele pertence à janela principal; mexê-lo de uma sub-window deixava
-  // uma janela branca e atrapalhava a main UI). alwaysOnTop/skipTaskbar não estão expostos
-  // no WindowController do fork — widget aparece como janela normal no canto, sem on-top.
   final ctrl = WindowController.fromWindowId(kWindowId!);
   try { await ctrl.setTitle('ConectDesk'); } catch (_) {}
   // Posiciona canto inferior direito da tela primária.
