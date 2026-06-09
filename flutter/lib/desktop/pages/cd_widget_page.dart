@@ -20,11 +20,15 @@ class CdWidgetPage extends StatefulWidget {
 
 class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderStateMixin {
   Timer? _poll;
+  Timer? _tick;
   String _techName = '';
   String _techPhotoPath = '';
   String _brandName = '';
   String _brandLogoPath = '';
   String _sessionId = '';
+  DateTime? _sessionStart; // marcado quando uma sessão nova aparece (≈ início real)
+  Duration _elapsed = Duration.zero;
+  bool _collapsed = false;
   late final AnimationController _fade;
   late final Animation<double> _fadeAnim;
 
@@ -35,15 +39,27 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     _fadeAnim = CurvedAnimation(parent: _fade, curve: Curves.easeOutCubic);
     _refresh();
     _poll = Timer.periodic(const Duration(milliseconds: 1500), (_) => _refresh());
-    // Fade-in 60ms depois do build pra evitar flash do gradient enquanto Flutter mede frame.
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_sessionStart != null && mounted) {
+        setState(() => _elapsed = DateTime.now().difference(_sessionStart!));
+      }
+    });
     Future.delayed(const Duration(milliseconds: 60), () { if (mounted) _fade.forward(); });
   }
 
   @override
   void dispose() {
     _poll?.cancel();
+    _tick?.cancel();
     _fade.dispose();
     super.dispose();
+  }
+
+  String _fmtElapsed() {
+    final h = _elapsed.inHours;
+    final m = _elapsed.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = _elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '${h}h ${m}m ${s}s' : '$m:$s';
   }
 
   void _refresh() {
@@ -54,6 +70,14 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     final bp = bind.mainGetOptionSync(key: 'cd_brand_logo_path');
     if (n != _techName || p != _techPhotoPath || s != _sessionId ||
         bn != _brandName || bp != _brandLogoPath) {
+      // Sessão nova (id mudou pra não-vazio) → começa a contar o tempo.
+      if (s.isNotEmpty && s != _sessionId) {
+        _sessionStart = DateTime.now();
+        _elapsed = Duration.zero;
+      } else if (s.isEmpty) {
+        _sessionStart = null;
+        _elapsed = Duration.zero;
+      }
       setState(() {
         _techName = n; _techPhotoPath = p; _sessionId = s;
         _brandName = bn; _brandLogoPath = bp;
@@ -86,8 +110,10 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 4))],
             ),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: hasSession ? _sessionBody(brand) : _idleBody(brand),
+              padding: EdgeInsets.symmetric(horizontal: _collapsed ? 12 : 14, vertical: _collapsed ? 8 : 12),
+              child: _collapsed
+                  ? _collapsedBody(brand)
+                  : (hasSession ? _sessionBody(brand) : _idleBody(brand)),
             ),
           ),
         ),
@@ -127,7 +153,7 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
     final techDisplay = _techName.isNotEmpty ? _techName : 'Técnico';
     return Row(
       children: [
-        _techAvatar(60),
+        _techAvatar(56),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -137,17 +163,58 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
               Text(techDisplay, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
               const SizedBox(height: 2),
               Text('Técnico $brand', style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11), overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Row(children: [
                 Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xff7CFF9C), shape: BoxShape.circle, boxShadow: [BoxShadow(color: Color(0x807CFF9C), blurRadius: 6)])),
                 const SizedBox(width: 6),
-                const Text('Em atendimento', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                Text('Em atendimento · ${_fmtElapsed()}', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
               ]),
             ],
           ),
         ),
-        _brandLogo(38),
+        Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _collapseBtn(),
+            _brandLogo(32),
+          ],
+        ),
       ],
+    );
+  }
+
+  // Pílula recolhida: só logo + tempo, bem pequena. Clica pra expandir.
+  Widget _collapsedBody(String brand) {
+    return GestureDetector(
+      onTap: () => setState(() => _collapsed = false),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _brandLogo(28),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              _sessionId.isNotEmpty ? 'Em atendimento · ${_fmtElapsed()}' : 'ConectDesk',
+              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 6),
+          const Icon(Icons.unfold_more, color: Color(0xCCFFFFFF), size: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _collapseBtn() {
+    return InkWell(
+      onTap: () => setState(() => _collapsed = true),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 22, height: 22,
+        alignment: Alignment.center,
+        child: const Icon(Icons.unfold_less, color: Color(0xCCFFFFFF), size: 16),
+      ),
     );
   }
 

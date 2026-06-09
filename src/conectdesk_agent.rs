@@ -47,7 +47,7 @@ const ACTIVE_SESSION_TECH_PHOTO_PATH_KEY: &str = "cd_active_session_tech_photo_p
 // Histórico de sessões — JSON array salvo em option pra Flutter ler sem HTTP. Refresh
 // a cada SESSION_HISTORY_INTERVAL_SECS via sync_session_history().
 const SESSION_HISTORY_KEY: &str = "cd_session_history";
-const SESSION_HISTORY_INTERVAL_SECS: u64 = 300; // 5 min
+const SESSION_HISTORY_INTERVAL_SECS: u64 = 60; // 1 min (histórico mais fresco no app)
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const SYSINFO_INTERVAL_SECS: u64 = 600;     // 10 min
 const UPDATE_INTERVAL_SECS: u64 = 1800;     // 30 min
