@@ -65,9 +65,9 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     final hasSession = _sessionId.isNotEmpty;
     final brand = _brandName.isNotEmpty ? _brandName : 'SGA Petro';
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
+    // Sem MaterialApp aqui: runCdWidgetWindow já roda via _runApp → GetMaterialApp. Ter um
+    // MaterialApp aninhado deixava o widget renderizar BRANCO (dois MaterialApp empilhados).
+    return Scaffold(
         backgroundColor: Colors.transparent,
         body: GestureDetector(
           onPanStart: (_) async { try { await windowManager.startDragging(); } catch (_) {} },
@@ -91,7 +91,6 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
             ),
           ),
         ),
-      ),
         ),
       ),
     );
