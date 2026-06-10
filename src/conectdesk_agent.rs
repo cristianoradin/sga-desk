@@ -291,7 +291,7 @@ fn collect_health_blocks() -> Value {
     {
         // Discos físicos + SMART (HealthStatus: Healthy/Warning/Unhealthy).
         let disks = as_array(ps_json(
-            "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,@{n='sizeGB';e={[math]::Round($_.Size/1GB)}} | ConvertTo-Json -Compress"));
+            "Get-PhysicalDisk | Select-Object -First 12 FriendlyName,MediaType,HealthStatus,@{n='sizeGB';e={[math]::Round($_.Size/1GB)}} | ConvertTo-Json -Compress"));
         // UPS / nobreak (BatteryStatus: 1=na bateria, 2=AC/carregando).
         let ups = ps_json(
             "Get-CimInstance Win32_Battery | Select-Object -First 1 BatteryStatus,EstimatedChargeRemaining,EstimatedRunTime | ConvertTo-Json -Compress");
@@ -312,7 +312,7 @@ fn collect_health_blocks() -> Value {
             "try { (Get-CimInstance SoftwareLicensingProduct -Filter \"Name like 'Windows%25' AND PartialProductKey is not null\" | Select-Object -First 1).LicenseStatus | ConvertTo-Json -Compress } catch { 'null' }");
         // Impressoras (status + fila).
         let printers = as_array(ps_json(
-            "Get-Printer | Select-Object Name,@{n='status';e={$_.PrinterStatus.ToString()}} | ConvertTo-Json -Compress"));
+            "Get-Printer | Select-Object -First 20 Name,@{n='status';e={$_.PrinterStatus.ToString()}} | ConvertTo-Json -Compress"));
         // Qualidade do link pro servidor (latência média + perda).
         let net = collect_network_quality();
 
@@ -474,8 +474,19 @@ fn exec_remote_action(action: &str, arg: &str) -> (bool, String) {
                 if let Ok(rd) = std::fs::read_dir(&dir) {
                     for e in rd.flatten() {
                         let p = e.path();
-                        if let Ok(m) = e.metadata() { if m.is_file() { freed += m.len(); let _ = std::fs::remove_file(&p); }
-                            else if m.is_dir() { let _ = std::fs::remove_dir_all(&p); } }
+                        // symlink_metadata NÃO segue links → uma entrada que é symlink/junction
+                        // (ex: apontando pra C:\Windows) é removida como link, nunca recursada.
+                        // Sem isto, remove_dir_all seguiria o link e apagaria o alvo (somos SYSTEM).
+                        let Ok(m) = std::fs::symlink_metadata(&p) else { continue };
+                        let ft = m.file_type();
+                        if ft.is_symlink() {
+                            let _ = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p));
+                        } else if ft.is_file() {
+                            freed += m.len();
+                            let _ = std::fs::remove_file(&p);
+                        } else if ft.is_dir() {
+                            let _ = std::fs::remove_dir_all(&p);
+                        }
                     }
                 }
             }
@@ -1082,7 +1093,8 @@ pub fn start() {
                 let _ = send_sysinfo(&token).await;
             }
             // Saúde/segurança/rede/periféricos a cada 5h (e no primeiro tick após subir).
-            if tick == 1 || tick * HEARTBEAT_INTERVAL_SECS % HEALTH_INTERVAL_SECS == 0 {
+            // tick=0 já cobre o boot; depois a cada 5h. (Sem `tick==1` redundante que disparava 2x.)
+            if tick * HEARTBEAT_INTERVAL_SECS % HEALTH_INTERVAL_SECS == 0 {
                 let _ = send_health(&token).await;
             }
             // Update agora é ON-DEMAND (vem via heartbeat resp.requestUpdate quando o painel
