@@ -213,7 +213,9 @@ fn collect_sysinfo() -> Value {
 fn collect_services() -> Value {
     #[cfg(target_os = "windows")]
     {
-        let ps = "Get-Service | Sort-Object Status,DisplayName | Select-Object -First 200 Name,DisplayName,Status | ConvertTo-Json -Compress";
+        // [Console]::OutputEncoding=UTF8 — sem isto o PowerShell sai no codepage local (CP1252 no
+        // PT-BR) e os acentos dos DisplayName chegam corrompidos (Hor�rio, aquisi�ao).
+        let ps = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Service | Sort-Object Status,DisplayName | Select-Object -First 200 Name,DisplayName,Status | ConvertTo-Json -Compress";
         if let Ok(o) = hidden_command("powershell.exe")
             .args(["-NoProfile", "-Command", ps]).output()
         {
@@ -270,7 +272,7 @@ fn collect_processes() -> Value {
 fn collect_processes_cpu() -> Value {
     #[cfg(target_os = "windows")]
     {
-        let ps = "Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name,@{n='cpuSec';e={[int]($_.CPU)}},@{n='memMB';e={[int]($_.WS/1MB)}} | ConvertTo-Json -Compress";
+        let ps = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name,@{n='cpuSec';e={[int]($_.CPU)}},@{n='memMB';e={[int]($_.WS/1MB)}} | ConvertTo-Json -Compress";
         if let Ok(o) = hidden_command("powershell.exe").args(["-NoProfile", "-Command", ps]).output() {
             let s = String::from_utf8_lossy(&o.stdout);
             if let Ok(v) = serde_json::from_str::<Value>(s.trim()) {
@@ -286,8 +288,10 @@ fn collect_processes_cpu() -> Value {
 // best-effort: se o PowerShell falhar, devolve null e o painel mostra "—".
 #[cfg(target_os = "windows")]
 fn ps_json(cmd: &str) -> Value {
+    // Prefixo UTF-8 pra acentos não corromperem (events, impressoras, etc no PT-BR).
+    let cmd = format!("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; {}", cmd);
     match hidden_command("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", cmd]).output()
+        .args(["-NoProfile", "-NonInteractive", "-Command", &cmd]).output()
     {
         Ok(o) => {
             let s = String::from_utf8_lossy(&o.stdout);
