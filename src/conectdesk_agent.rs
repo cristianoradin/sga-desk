@@ -786,8 +786,14 @@ async fn maybe_update() {
     // Files + registra o serviço). O `/S` (flag NSIS) era IGNORADO → o exe rodava como app e o
     // serviço NUNCA atualizava (download ok, update não aplicava). Esse era o motivo das máquinas
     // não auto-atualizarem. `--silent-install` (= o que o instalador manual usa) corrige.
+    //
+    // Blindagem pós-install (PDV não pode ficar sem serviço): depois do --silent-install, um loop
+    // de até ~30s garante o serviço Running — se o install_me copiou mas não iniciou (sc start
+    // falhou/timeout), o Start-Service recupera. O processo atual morre quando o serviço para
+    // durante o install; o PowerShell é detached (Start-Process) e sobrevive pra fazer essa
+    // verificação. Sucesso volta naturalmente: o novo serviço sobe → heartbeat → painel online.
     let ps = format!(
-        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"& '{}' --silent-install; Start-Sleep -Seconds 10\"",
+        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"& '{}' --silent-install; Start-Sleep -Seconds 12; for ($i=0; $i -lt 6; $i++){{ $s=Get-Service ConectDesk -ErrorAction SilentlyContinue; if($s -and $s.Status -eq 'Running'){{break}}; Start-Service ConectDesk -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5 }}\"",
         tmp.display()
     );
     log::info!("ConectDesk update: launching detached installer for build {}", remote_build);
