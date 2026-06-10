@@ -203,6 +203,7 @@ fn collect_sysinfo() -> Value {
         "software": {
             "services": collect_services(),
             "processes": collect_processes(),
+            "processesCpu": collect_processes_cpu(),
         },
     })
 }
@@ -265,6 +266,21 @@ fn collect_processes() -> Value {
     json!([])
 }
 
+// Top processos por uso de CPU (tempo acumulado em segundos) + RAM. Complementa o top-por-RAM.
+fn collect_processes_cpu() -> Value {
+    #[cfg(target_os = "windows")]
+    {
+        let ps = "Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Name,@{n='cpuSec';e={[int]($_.CPU)}},@{n='memMB';e={[int]($_.WS/1MB)}} | ConvertTo-Json -Compress";
+        if let Ok(o) = hidden_command("powershell.exe").args(["-NoProfile", "-Command", ps]).output() {
+            let s = String::from_utf8_lossy(&o.stdout);
+            if let Ok(v) = serde_json::from_str::<Value>(s.trim()) {
+                return if v.is_array() { v } else { json!([v]) };
+            }
+        }
+    }
+    json!([])
+}
+
 // ---- Saúde / segurança / rede / periféricos (coleta pesada via PowerShell) ----
 // Roda a cada 5h (HEALTH_INTERVAL_SECS) ou sob demanda (botão "coletar agora"). Cada bloco é
 // best-effort: se o PowerShell falhar, devolve null e o painel mostra "—".
@@ -315,12 +331,17 @@ fn collect_health_blocks() -> Value {
             "Get-Printer | Select-Object -First 20 Name,@{n='status';e={$_.PrinterStatus.ToString()}} | ConvertTo-Json -Compress"));
         // Qualidade do link pro servidor (latência média + perda).
         let net = collect_network_quality();
+        // I/O do disco: latência média por transferência (ms). Alto (>20-25ms) = disco lento → PDV
+        // travando. Win32_PerfFormattedData evita o sample de 2x do Get-Counter.
+        let disk_latency = ps_json(
+            "try { [int]((Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk | Where-Object Name -eq '_Total').AvgDisksecPerTransfer * 1000) | ConvertTo-Json -Compress } catch { 'null' }");
 
         return json!({
             "health": {
                 "disks": disks,
                 "ups": ups,
                 "events": events,
+                "diskLatencyMs": disk_latency,
             },
             "security": {
                 "lastWindowsUpdate": last_update,
@@ -500,6 +521,104 @@ fn exec_remote_action(action: &str, arg: &str) -> (bool, String) {
             if !valid { return (false, "nome de processo inválido".into()); }
             let r = hidden_command("taskkill.exe").args(["/F", "/IM", name]).status();
             match r { Ok(s) if s.success() => (true, format!("{} encerrado", name)), _ => (false, format!("falha ao encerrar {}", name)) }
+        }
+        // ---- Serviços (arg = nome do serviço Windows) ----
+        "service_start" | "service_stop" | "service_restart" => {
+            let name = arg.trim();
+            // Nome de serviço Windows: alfanum + _ - . (sem espaço/aspas — defesa extra; Command
+            // não usa shell mesmo). Vazio → recusa.
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+                return (false, "nome de serviço inválido".into());
+            }
+            match action {
+                "service_start" => { let _ = hidden_command("sc.exe").args(["start", name]).status(); (true, format!("serviço {} iniciado", name)) }
+                "service_stop" => { let _ = hidden_command("sc.exe").args(["stop", name]).status(); (true, format!("serviço {} parado", name)) }
+                _ => {
+                    let _ = hidden_command("sc.exe").args(["stop", name]).status();
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    let _ = hidden_command("sc.exe").args(["start", name]).status();
+                    (true, format!("serviço {} reiniciado", name))
+                }
+            }
+        }
+        // ---- Impressão: limpa fila + reinicia spooler (impressora fiscal travada) ----
+        "print_clear" => {
+            let ps = "Stop-Service Spooler -Force -ErrorAction SilentlyContinue; \
+                Remove-Item \"$env:SystemRoot\\System32\\spool\\PRINTERS\\*\" -Force -ErrorAction SilentlyContinue; \
+                Start-Service Spooler -ErrorAction SilentlyContinue";
+            let _ = hidden_command("powershell.exe").args(["-NoProfile", "-Command", ps]).status();
+            (true, "fila de impressão limpa + spooler reiniciado".into())
+        }
+        // ---- Windows Update: dispara verificação/instalação ----
+        "windows_update" => {
+            let _ = hidden_command("UsoClient.exe").args(["StartInstall"]).status();
+            (true, "Windows Update disparado".into())
+        }
+        // ---- Energia / sessão ----
+        "shutdown" => {
+            let r = hidden_command("shutdown.exe").args(["/s", "/t", "30", "/c", "ConectDesk: desligamento solicitado pelo suporte"]).status();
+            match r { Ok(s) if s.success() => (true, "desligamento agendado (30s)".into()), _ => (false, "falha ao desligar".into()) }
+        }
+        "logoff" => { let _ = hidden_command("shutdown.exe").args(["/l"]).status(); (true, "logoff solicitado".into()) }
+        "lock" => {
+            // Bloqueia a estação. Como SYSTEM pode não atingir a sessão do usuário — best-effort.
+            let _ = hidden_command("rundll32.exe").args(["user32.dll,LockWorkStation"]).status();
+            (true, "bloqueio de tela solicitado".into())
+        }
+        // ---- Agendar reboot pra um horário HH:MM (próxima ocorrência) ----
+        "schedule_reboot" => {
+            let t = arg.trim();
+            // valida HH:MM
+            let ok = t.len() == 5 && t.as_bytes()[2] == b':'
+                && t[..2].parse::<u8>().map(|h| h < 24).unwrap_or(false)
+                && t[3..].parse::<u8>().map(|m| m < 60).unwrap_or(false);
+            if !ok { return (false, "horário inválido (use HH:MM)".into()); }
+            let ps = format!(
+                "$t=[datetime]::Today.AddHours({}).AddMinutes({}); if($t -lt (Get-Date)){{$t=$t.AddDays(1)}}; $s=[int]($t-(Get-Date)).TotalSeconds; shutdown /r /t $s /c 'ConectDesk: reinicio agendado pelo suporte'",
+                &t[..2], &t[3..]
+            );
+            let _ = hidden_command("powershell.exe").args(["-NoProfile", "-Command", &ps]).status();
+            (true, format!("reinício agendado para {}", t))
+        }
+        // ---- Reinicia o próprio serviço ConectDesk (detached, senão mata a si mesmo antes) ----
+        "restart_agent" => {
+            let ps = "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command',\"Stop-Service ConectDesk -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; Start-Service ConectDesk -ErrorAction SilentlyContinue\"";
+            let _ = hidden_command("powershell.exe").args(["-NoProfile", "-Command", ps]).spawn();
+            (true, "agente ConectDesk reiniciando".into())
+        }
+        // ---- Rede: limpa cache DNS + renova IP ----
+        "flush_dns" => {
+            let _ = hidden_command("ipconfig.exe").args(["/flushdns"]).status();
+            let _ = hidden_command("ipconfig.exe").args(["/registerdns"]).status();
+            (true, "DNS limpo + registrado".into())
+        }
+        // ---- Mensagem na tela do cliente ----
+        "message" => {
+            let txt: String = arg.chars().filter(|c| *c != '\r' && *c != '\n').take(220).collect();
+            if txt.trim().is_empty() { return (false, "mensagem vazia".into()); }
+            // msg.exe envia pra todas as sessões interativas. Command::args → texto é 1 argv.
+            let _ = hidden_command("msg.exe").args(["*", "/TIME:60", &txt]).status();
+            (true, "mensagem enviada ao cliente".into())
+        }
+        // ---- Limpeza profunda: temp + lixeira + cache Windows Update + prefetch ----
+        "deep_clean" => {
+            let ps = "Get-ChildItem \"$env:TEMP\",\"$env:SystemRoot\\Temp\",\"$env:SystemRoot\\Prefetch\" -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue; \
+                Clear-RecycleBin -Force -ErrorAction SilentlyContinue; \
+                Stop-Service wuauserv -Force -ErrorAction SilentlyContinue; \
+                Remove-Item \"$env:SystemRoot\\SoftwareDistribution\\Download\\*\" -Recurse -Force -ErrorAction SilentlyContinue; \
+                Start-Service wuauserv -ErrorAction SilentlyContinue";
+            let _ = hidden_command("powershell.exe").args(["-NoProfile", "-Command", ps]).status();
+            (true, "limpeza profunda concluída (temp, lixeira, cache de update, prefetch)".into())
+        }
+        // ---- Reparo do sistema ----
+        "chkdsk" => {
+            // /scan = online, não precisa reboot.
+            let _ = hidden_command("chkdsk.exe").args(["C:", "/scan"]).status();
+            (true, "chkdsk (scan online) executado".into())
+        }
+        "sfc" => {
+            let _ = hidden_command("sfc.exe").args(["/scannow"]).status();
+            (true, "sfc /scannow executado".into())
         }
         other => (false, format!("ação desconhecida: {}", other)),
     }
