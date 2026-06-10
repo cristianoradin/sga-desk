@@ -782,8 +782,12 @@ async fn maybe_update() {
     report_update_status(&token, "installing", &format!("Instalando {} (silent)", remote_version)).await;
     // Detached PowerShell: stop service, install silent, restart. The current process gets killed
     // mid-install when the service stops — that's expected. The detached child survives and finishes.
+    // O binário é o portátil do fork — ele instala com `--silent-install` (copia pro Program
+    // Files + registra o serviço). O `/S` (flag NSIS) era IGNORADO → o exe rodava como app e o
+    // serviço NUNCA atualizava (download ok, update não aplicava). Esse era o motivo das máquinas
+    // não auto-atualizarem. `--silent-install` (= o que o instalador manual usa) corrige.
     let ps = format!(
-        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"Stop-Service ConectDesk -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3; & '{}' /S; Start-Sleep -Seconds 8; Start-Service ConectDesk -ErrorAction SilentlyContinue\"",
+        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"& '{}' --silent-install; Start-Sleep -Seconds 10\"",
         tmp.display()
     );
     log::info!("ConectDesk update: launching detached installer for build {}", remote_build);
