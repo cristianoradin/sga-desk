@@ -53,6 +53,7 @@ const SESSION_HISTORY_KEY: &str = "cd_session_history";
 const SESSION_HISTORY_INTERVAL_SECS: u64 = 60; // 1 min (histórico mais fresco no app)
 const HEARTBEAT_INTERVAL_SECS: u64 = 30;
 const SYSINFO_INTERVAL_SECS: u64 = 600;     // 10 min
+const HEALTH_INTERVAL_SECS: u64 = 18000;    // 5 h — coleta pesada (saúde/segurança/rede/periféricos)
 const UPDATE_INTERVAL_SECS: u64 = 1800;     // 30 min
 const BRANDING_INTERVAL_SECS: u64 = 300;    // 5 min
 const PROBE_INTERVAL_SECS: u64 = 60;        // bombas + watchdog
@@ -264,6 +265,95 @@ fn collect_processes() -> Value {
     json!([])
 }
 
+// ---- Saúde / segurança / rede / periféricos (coleta pesada via PowerShell) ----
+// Roda a cada 5h (HEALTH_INTERVAL_SECS) ou sob demanda (botão "coletar agora"). Cada bloco é
+// best-effort: se o PowerShell falhar, devolve null e o painel mostra "—".
+#[cfg(target_os = "windows")]
+fn ps_json(cmd: &str) -> Value {
+    match hidden_command("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", cmd]).output()
+    {
+        Ok(o) => {
+            let s = String::from_utf8_lossy(&o.stdout);
+            serde_json::from_str::<Value>(s.trim()).unwrap_or(Value::Null)
+        }
+        Err(_) => Value::Null,
+    }
+}
+#[cfg(target_os = "windows")]
+fn as_array(v: Value) -> Value {
+    match v { Value::Null => json!([]), Value::Array(_) => v, other => json!([other]) }
+}
+
+// Coleta os 4 blocos pesados. Retorna um objeto pra fazer merge no sysinfo (a API merge top-level).
+fn collect_health_blocks() -> Value {
+    #[cfg(target_os = "windows")]
+    {
+        // Discos físicos + SMART (HealthStatus: Healthy/Warning/Unhealthy).
+        let disks = as_array(ps_json(
+            "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,@{n='sizeGB';e={[math]::Round($_.Size/1GB)}} | ConvertTo-Json -Compress"));
+        // UPS / nobreak (BatteryStatus: 1=na bateria, 2=AC/carregando).
+        let ups = ps_json(
+            "Get-CimInstance Win32_Battery | Select-Object -First 1 BatteryStatus,EstimatedChargeRemaining,EstimatedRunTime | ConvertTo-Json -Compress");
+        // Eventos críticos recentes (System, erros/críticos, 3 dias, top 12).
+        let events = as_array(ps_json(
+            "try { Get-WinEvent -FilterHashtable @{LogName='System';Level=1,2;StartTime=(Get-Date).AddDays(-3)} -MaxEvents 12 -ErrorAction Stop | Select-Object @{n='ts';e={$_.TimeCreated.ToString('s')}},Id,ProviderName,LevelDisplayName,@{n='msg';e={$_.Message -replace '\\s+',' ' | ForEach-Object { $_.Substring(0,[math]::Min(140,$_.Length)) }}} | ConvertTo-Json -Compress } catch { '[]' }"));
+        // Última atualização instalada (proxy de Windows Update em dia).
+        let last_update = ps_json(
+            "try { (Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn.ToString('yyyy-MM-dd') | ConvertTo-Json -Compress } catch { 'null' }");
+        // Defender / antivírus.
+        let defender = ps_json(
+            "try { Get-MpComputerStatus | Select-Object AntivirusEnabled,RealTimeProtectionEnabled,@{n='sigAgeDays';e={$_.AntivirusSignatureAge}} | ConvertTo-Json -Compress } catch { 'null' }");
+        // Firewall por perfil.
+        let firewall = as_array(ps_json(
+            "Get-NetFirewallProfile | Select-Object Name,Enabled | ConvertTo-Json -Compress"));
+        // Licença do Windows (LicenseStatus 1 = ativado).
+        let licensed = ps_json(
+            "try { (Get-CimInstance SoftwareLicensingProduct -Filter \"Name like 'Windows%25' AND PartialProductKey is not null\" | Select-Object -First 1).LicenseStatus | ConvertTo-Json -Compress } catch { 'null' }");
+        // Impressoras (status + fila).
+        let printers = as_array(ps_json(
+            "Get-Printer | Select-Object Name,@{n='status';e={$_.PrinterStatus.ToString()}} | ConvertTo-Json -Compress"));
+        // Qualidade do link pro servidor (latência média + perda).
+        let net = collect_network_quality();
+
+        return json!({
+            "health": {
+                "disks": disks,
+                "ups": ups,
+                "events": events,
+            },
+            "security": {
+                "lastWindowsUpdate": last_update,
+                "defender": defender,
+                "firewall": firewall,
+                "windowsLicensed": licensed,
+            },
+            "redeQualidade": net,
+            "peripherals": {
+                "printers": printers,
+            },
+        });
+    }
+    #[allow(unreachable_code)]
+    json!({})
+}
+
+// Latência média (ms) + perda (%) num ping ao host do servidor — qualidade do link do posto.
+#[cfg(target_os = "windows")]
+fn collect_network_quality() -> Value {
+    let host = api_base()
+        .and_then(|b| b.split("://").nth(1).map(|s| s.split('/').next().unwrap_or("").split(':').next().unwrap_or("").to_string()))
+        .unwrap_or_default();
+    if host.is_empty() { return Value::Null; }
+    let cmd = format!(
+        "try {{ $r = Test-Connection -ComputerName '{}' -Count 4 -ErrorAction Stop; \
+         [pscustomobject]@{{ avgMs=[math]::Round(($r | Measure-Object ResponseTime -Average).Average); \
+         loss=0 }} | ConvertTo-Json -Compress }} catch {{ '{{\"avgMs\":null,\"loss\":100}}' }}", host);
+    ps_json(&cmd)
+}
+#[cfg(not(target_os = "windows"))]
+fn collect_network_quality() -> Value { Value::Null }
+
 fn collect_disks() -> Value {
     // sysinfo nesse fork pode não expor Disks API publicamente — usamos WMI no Windows.
     #[cfg(target_os = "windows")]
@@ -333,6 +423,78 @@ async fn send_sysinfo(token: &str) -> bool {
         Err(e) => { log::warn!("ConectDesk sysinfo: {:?}", e); false }
     }
 }
+
+// Envia os blocos pesados de saúde (merge no sysinfo via setSysinfo da API). Timeout maior — o
+// PowerShell (eventlog, Test-Connection) é lento. Chamado a cada 5h e no "coletar agora".
+async fn send_health(token: &str) -> bool {
+    let Some(base) = api_base() else { return false };
+    let Some(client) = http_client(60) else { return false };
+    let body = collect_health_blocks();
+    let url = format!("{}/api/agents/sysinfo", base);
+    match client.post(&url).header("x-agent-token", token).json(&body).send().await {
+        Ok(resp) => resp.status().is_success(),
+        Err(e) => { log::warn!("ConectDesk health: {:?}", e); false }
+    }
+}
+
+// -- Comandos remotos (reboot / limpar temp / matar processo) ----------------
+// Enfileirados pelo painel (admin) e drenados no heartbeat. Allowlist estrita de ações; nada de
+// shell arbitrário. Roda como SYSTEM, então cada ação é fechada e validada. Faz ack pro painel.
+async fn run_remote_command(token: &str, cmd: &Value) {
+    let id = cmd.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let action = cmd.get("action").and_then(|v| v.as_str()).unwrap_or("");
+    let arg = cmd.get("arg").and_then(|v| v.as_str()).unwrap_or("");
+    if id.is_empty() { return; }
+    log::info!("ConectDesk: comando remoto '{}' (arg='{}')", action, arg);
+    let (ok, msg) = exec_remote_action(action, arg);
+    // ack pro painel (auditoria).
+    if let (Some(base), Some(client)) = (api_base(), http_client(10)) {
+        let url = format!("{}/api/agents/me/command-ack", base);
+        let body = json!({ "id": id, "ok": ok, "message": msg });
+        let _ = client.post(&url).header("x-agent-token", token).json(&body).send().await;
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn exec_remote_action(action: &str, arg: &str) -> (bool, String) {
+    match action {
+        "reboot" => {
+            // 30s de aviso + mensagem; admin pode cancelar com shutdown /a manualmente.
+            let r = hidden_command("shutdown.exe")
+                .args(["/r", "/t", "30", "/c", "ConectDesk: reinicio remoto solicitado pelo suporte"]).status();
+            match r { Ok(s) if s.success() => (true, "reboot agendado (30s)".into()), _ => (false, "falha ao agendar reboot".into()) }
+        }
+        "cancel_reboot" => {
+            let _ = hidden_command("shutdown.exe").args(["/a"]).status();
+            (true, "reboot cancelado".into())
+        }
+        "cleanup_temp" => {
+            let mut freed = 0u64;
+            for dir in [std::env::var("TEMP").ok(), Some("C:\\Windows\\Temp".to_string())].into_iter().flatten() {
+                if let Ok(rd) = std::fs::read_dir(&dir) {
+                    for e in rd.flatten() {
+                        let p = e.path();
+                        if let Ok(m) = e.metadata() { if m.is_file() { freed += m.len(); let _ = std::fs::remove_file(&p); }
+                            else if m.is_dir() { let _ = std::fs::remove_dir_all(&p); } }
+                    }
+                }
+            }
+            (true, format!("temp limpo (~{} MB liberados)", freed / (1024*1024)))
+        }
+        "kill_process" => {
+            // arg = nome da imagem (ex: chrome.exe). Valida: só alfanum/._- + termina .exe.
+            let name = arg.trim();
+            let valid = !name.is_empty() && name.to_lowercase().ends_with(".exe")
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-');
+            if !valid { return (false, "nome de processo inválido".into()); }
+            let r = hidden_command("taskkill.exe").args(["/F", "/IM", name]).status();
+            match r { Ok(s) if s.success() => (true, format!("{} encerrado", name)), _ => (false, format!("falha ao encerrar {}", name)) }
+        }
+        other => (false, format!("ação desconhecida: {}", other)),
+    }
+}
+#[cfg(not(target_os = "windows"))]
+fn exec_remote_action(_action: &str, _arg: &str) -> (bool, String) { (false, "não suportado".into()) }
 
 // -- WoL: send magic packet UDP broadcast on port 9 -------------------------
 async fn dispatch_wol(targets: &[Value]) {
@@ -857,6 +1019,16 @@ pub fn start() {
                         log::info!("ConectDesk: requestUpdate=true do painel — disparando update");
                         maybe_update().await;
                     }
+                    // "Coletar agora" do painel: força sysinfo leve + bloco pesado de saúde na hora.
+                    if resp.get("refreshSysinfo").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        log::info!("ConectDesk: refreshSysinfo=true — coletando sysinfo + saúde agora");
+                        let _ = send_sysinfo(&token).await;
+                        let _ = send_health(&token).await;
+                    }
+                    // Comandos remotos enfileirados pelo painel (reboot / limpar temp / matar processo).
+                    if let Some(cmds) = resp.get("commands").and_then(|v| v.as_array()) {
+                        for c in cmds { run_remote_command(&token, c).await; }
+                    }
                     // Sessões ativas (multi-técnico): mostra TODOS os técnicos conectados.
                     // Usa activeSessions (lista); cai pra activeSession (singular) em servidores
                     // antigos. Quando há sessões, ressincroniza nomes+fotos; quando some, limpa.
@@ -908,6 +1080,10 @@ pub fn start() {
             // Sysinfo periódico.
             if tick * HEARTBEAT_INTERVAL_SECS % SYSINFO_INTERVAL_SECS == 0 {
                 let _ = send_sysinfo(&token).await;
+            }
+            // Saúde/segurança/rede/periféricos a cada 5h (e no primeiro tick após subir).
+            if tick == 1 || tick * HEARTBEAT_INTERVAL_SECS % HEALTH_INTERVAL_SECS == 0 {
+                let _ = send_health(&token).await;
             }
             // Update agora é ON-DEMAND (vem via heartbeat resp.requestUpdate quando o painel
             // marca). Removido o auto-loop de 30min — gerava re-install eterno porque o
