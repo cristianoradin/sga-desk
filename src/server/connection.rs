@@ -2315,12 +2315,14 @@ impl Connection {
             base.trim_end_matches('/'),
             id
         );
+        // x-agent-token: o endpoint /ended agora é autenticado (antes público → DoS de sessão).
+        let token = hbb_common::config::Config::get_option("conectdesk_token");
         if let Ok(client) = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .timeout(std::time::Duration::from_secs(8))
             .build()
         {
-            let _ = client.post(&url).send().await;
+            let _ = client.post(&url).header("x-agent-token", token).send().await;
         }
     }
 

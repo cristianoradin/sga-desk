@@ -467,9 +467,38 @@ fn attempt_restart(kind: &str, name: &str, exec_path: &str) {
         log::info!("ConectDesk watchdog: restart service {}", name);
         let _ = hidden_command("sc.exe").args(["start", name]).status();
     } else if kind == "process" && !exec_path.is_empty() {
+        // O agent roda como SYSTEM e exec_path vem do servidor → se o painel/servidor for
+        // comprometido, isto vira execução arbitrária como SYSTEM. Restringe o que pode ser
+        // lançado: caminho absoluto, .exe existente, dentro de Program Files / Windows
+        // (diretórios protegidos por ACL — só admin/installer escrevem). Bloqueia
+        // Temp/Downloads/perfis de usuário, onde um atacante consegue plantar um binário.
+        if !watchdog_exec_allowed(exec_path) {
+            log::warn!("ConectDesk watchdog: exec_path RECUSADO (fora de Program Files/Windows ou inexistente): {}", exec_path);
+            return;
+        }
         log::info!("ConectDesk watchdog: relaunch {}", exec_path);
         let _ = hidden_command(exec_path).spawn();
     }
+}
+
+#[cfg(target_os = "windows")]
+fn watchdog_exec_allowed(exec_path: &str) -> bool {
+    let p = std::path::Path::new(exec_path);
+    if !p.is_absolute() { return false; }
+    // Sem metachars de shell/argumentos embutidos (defesa extra; Command não usa shell, mas
+    // evita exec_path com aspas/redirecionamento sendo tratado como programa estranho).
+    if exec_path.contains('"') || exec_path.contains('&') || exec_path.contains('|') { return false; }
+    let lower = exec_path.to_lowercase();
+    if !lower.ends_with(".exe") { return false; }
+    if !p.is_file() { return false; }
+    // Tem que estar sob um diretório de sistema protegido por ACL.
+    let allowed_roots = [
+        std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into()).to_lowercase(),
+        std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into()).to_lowercase(),
+        std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()).to_lowercase(),
+        "c:\\programdata\\conectdesk".into(),
+    ];
+    allowed_roots.iter().any(|root| lower.starts_with(root.as_str()))
 }
 #[cfg(not(target_os = "windows"))]
 fn attempt_restart(_kind: &str, _name: &str, _exec_path: &str) {}
@@ -529,7 +558,7 @@ async fn maybe_update() {
         Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
         _ => { report_update_status(&token, "failed", "Falha ao buscar feed").await; return; }
     };
-    let Some((remote_build, remote_version, exe, _sha512)) = parse_fork_feed(&body) else {
+    let Some((remote_build, remote_version, exe, sha512)) = parse_fork_feed(&body) else {
         report_update_status(&token, "failed", "Feed inválido").await;
         return;
     };
@@ -547,6 +576,30 @@ async fn maybe_update() {
         Ok(r) if r.status().is_success() => match r.bytes().await { Ok(b) => b, Err(_) => { report_update_status(&token, "failed", "Falha ao ler corpo do download").await; return; } },
         _ => { log::warn!("ConectDesk update: download failed"); report_update_status(&token, "failed", "Download falhou").await; return; }
     };
+    // Verifica integridade: SHA-512 do download tem que bater com o do feed. Sem isto, um MITM no
+    // feed (TLS aceita cert inválido) poderia entregar um .exe malicioso instalado como SYSTEM.
+    // Se o feed traz sha512, é OBRIGATÓRIO bater; se não traz, recusa (fail-closed) — todo publish
+    // do publish-fork.sh inclui o hash.
+    match sha512.as_deref() {
+        Some(expected) => {
+            use sha2::{Digest, Sha512};
+            let mut hasher = Sha512::new();
+            hasher.update(&bytes);
+            let got = hasher.finalize();
+            let got_hex = got.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+            if !got_hex.eq_ignore_ascii_case(expected.trim()) {
+                log::error!("ConectDesk update: SHA-512 NÃO bate (esperado {}, obtido {})", expected, got_hex);
+                report_update_status(&token, "failed", "Integridade do download falhou (SHA-512) — atualização abortada").await;
+                return;
+            }
+            log::info!("ConectDesk update: SHA-512 verificado OK");
+        }
+        None => {
+            log::error!("ConectDesk update: feed sem sha512 — abortando (fail-closed)");
+            report_update_status(&token, "failed", "Feed sem checksum — atualização recusada").await;
+            return;
+        }
+    }
     let tmp = std::env::temp_dir().join(format!("ConectDesk-Update-{}.exe", remote_build));
     if std::fs::write(&tmp, &bytes).is_err() {
         log::error!("ConectDesk update: failed to write {:?}", tmp);
