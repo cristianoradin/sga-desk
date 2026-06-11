@@ -129,6 +129,7 @@ async fn heartbeat(token: &str) -> Option<Value> {
     let body = json!({
         "rustdeskId": rustdesk_id(),
         "agentVersion": agent_version(),
+        "buildId": local_build_id(),  // build_id baked — painel compara com o feed (atualizada/não)
         "forkInstalled": true,
         "rustdeskReady": true,
     });
