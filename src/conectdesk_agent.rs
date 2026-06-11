@@ -74,6 +74,21 @@ fn http_client(timeout_secs: u64) -> Option<reqwest::Client> {
 
 fn hostname() -> String { whoami::devicename() }
 fn os_name() -> String { std::env::consts::OS.to_string() }
+// ID de hardware estável (Windows MachineGuid) — sobrevive à reinstalação do agent. A API usa
+// pra deduplicar no enroll: mesma máquina que reinstalou (rustdesk_id novo) atualiza a entrada
+// existente em vez de criar duplicata (que causa o loop "conecta/desconecta").
+#[cfg(target_os = "windows")]
+fn machine_id() -> String {
+    hidden_command("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command",
+               "(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Cryptography' -Name MachineGuid).MachineGuid"])
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+#[cfg(not(target_os = "windows"))]
+fn machine_id() -> String { String::new() }
 fn rustdesk_id() -> String { Config::get_id() }
 fn agent_version() -> &'static str { env!("CARGO_PKG_VERSION") }
 fn saved_token() -> String { Config::get_option(TOKEN_KEY) }
@@ -110,6 +125,7 @@ async fn enroll() -> Option<String> {
         "osVersion": "",
         "rustdeskId": rustdesk_id(),
         "agentVersion": agent_version(),
+        "machineId": machine_id(),
     });
     let url = format!("{}/api/agents/enroll", base);
     match client.post(&url).header("x-api-key", key).json(&body).send().await {
