@@ -355,6 +355,10 @@ fn collect_health_blocks() -> Value {
                 "windowsLicensed": licensed,
             },
             "redeQualidade": net,
+            // Conexão P2P: NAT type detectado pelo RustDesk (0=desconhecido, 1=cone/assimétrico →
+            // P2P direto provável, 2=simétrico → punch falha contra outro simétrico → cai no relay).
+            // Preditor de quais postos conseguem P2P direto vs dependem do relay.
+            "conexao": { "natType": Config::get_nat_type() },
             "peripherals": {
                 "printers": printers,
             },
