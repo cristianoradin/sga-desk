@@ -920,8 +920,13 @@ async fn maybe_update() {
     // falhou/timeout), o Start-Service recupera. O processo atual morre quando o serviço para
     // durante o install; o PowerShell é detached (Start-Process) e sobrevive pra fazer essa
     // verificação. Sucesso volta naturalmente: o novo serviço sobe → heartbeat → painel online.
+    // CRÍTICO: parar o serviço ANTES do --silent-install. O install faz `copy /Y` por cima do
+    // ConectDesk.exe, e o Windows NÃO deixa sobrescrever um .exe em uso → com o serviço rodando a
+    // cópia falha em silêncio e fica o binário velho ("installing" eterno, build não avança). Para
+    // o serviço (libera o exe), espera Stopped de verdade, instala (copia OK), reinicia. O processo
+    // atual morre no Stop-Service; o PowerShell é detached (Start-Process) e sobrevive.
     let ps = format!(
-        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"& '{}' --silent-install; Start-Sleep -Seconds 12; for ($i=0; $i -lt 6; $i++){{ $s=Get-Service ConectDesk -ErrorAction SilentlyContinue; if($s -and $s.Status -eq 'Running'){{break}}; Start-Service ConectDesk -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5 }}\"",
+        "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',\"Stop-Service ConectDesk -Force -ErrorAction SilentlyContinue; for ($i=0; $i -lt 8; $i++){{ $s=Get-Service ConectDesk -ErrorAction SilentlyContinue; if(-not $s -or $s.Status -eq 'Stopped'){{break}}; Start-Sleep -Seconds 2 }}; & '{}' --silent-install; Start-Sleep -Seconds 12; for ($i=0; $i -lt 6; $i++){{ $s=Get-Service ConectDesk -ErrorAction SilentlyContinue; if($s -and $s.Status -eq 'Running'){{break}}; Start-Service ConectDesk -ErrorAction SilentlyContinue; Start-Sleep -Seconds 5 }}\"",
         tmp.display()
     );
     log::info!("ConectDesk update: launching detached installer for build {}", remote_build);
