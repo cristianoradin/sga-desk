@@ -90,13 +90,19 @@ fn main() {
         build_mac();
         println!("cargo:rustc-link-lib=framework=ApplicationServices");
     }
-    // ConectDesk: bake a build id (Unix seconds since epoch) into the binary so the in-service
-    // agent can compare its build against the feed's `build_id` and self-update without depending
-    // on Cargo.toml semver bumps.
-    let build_id = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // ConectDesk: bake a build id into the binary so the in-service agent can compare its build
+    // against the feed's `build_id` and self-update without depending on Cargo.toml semver bumps.
+    // MUST match the feed's build_id: publish-fork.sh uses the GitHub run id, so we bake the SAME
+    // GITHUB_RUN_ID here (monotonic, identical in binary and feed). Falls back to epoch for local
+    // dev builds (where publish-fork.sh `local` also uses epoch).
+    let build_id = std::env::var("GITHUB_RUN_ID")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or_else(|| std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0));
     println!("cargo:rustc-env=CONECTDESK_BUILD_ID={}", build_id);
+    println!("cargo:rerun-if-env-changed=GITHUB_RUN_ID");
     println!("cargo:rerun-if-changed=build.rs");
 }
