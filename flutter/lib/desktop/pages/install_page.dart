@@ -1,14 +1,9 @@
-import 'dart:convert';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:get/get.dart';
-import 'package:path/path.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 import 'package:window_manager/window_manager.dart';
 
 class InstallPage extends StatefulWidget {
@@ -63,24 +58,14 @@ class _InstallPageBody extends StatefulWidget {
 class _InstallPageBodyState extends State<_InstallPageBody>
     with WindowListener {
   late final TextEditingController controller;
-  final RxBool startmenu = true.obs;
-  final RxBool desktopicon = true.obs;
-  final RxBool printer = true.obs;
   final RxBool showProgress = false.obs;
   final RxBool btnEnabled = true.obs;
-
-  // todo move to theme.
-  final buttonStyle = OutlinedButton.styleFrom(
-    textStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.normal),
-    padding: EdgeInsets.symmetric(vertical: 15, horizontal: 12),
-  );
+  // ConectDesk: tela de conclusão pós-instalação (✅ + ID de conexão).
+  final RxBool showDone = false.obs;
+  final RxString myId = ''.obs;
 
   _InstallPageBodyState() {
     controller = TextEditingController(text: bind.installInstallPath());
-    final installOptions = jsonDecode(bind.installInstallOptions());
-    startmenu.value = installOptions['STARTMENUSHORTCUTS'] != '0';
-    desktopicon.value = installOptions['DESKTOPSHORTCUTS'] != '0';
-    printer.value = installOptions['PRINTER'] != '0';
   }
 
   @override
@@ -103,172 +88,172 @@ class _InstallPageBodyState extends State<_InstallPageBody>
     windowManager.close();
   }
 
-  InkWell Option(RxBool option, {String label = ''}) {
-    return InkWell(
-      // todo mouseCursor: "SystemMouseCursors.forbidden" or no cursor on btnEnabled == false
-      borderRadius: BorderRadius.circular(6),
-      onTap: () => btnEnabled.value ? option.value = !option.value : null,
-      child: Row(
+  // ConectDesk: instalador profissional pra cliente leigo (1ª instalação, sem
+  // rede de segurança). Tela única branded, 1 botão, progresso e conclusão com
+  // o ID — sem opções/caminho/agreement RustDesk que confundem o usuário.
+  static const Color _green = Color(0xff01A862);
+  static const Color _greenDeep = Color(0xff0A6A3A);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(
+        child: Obx(() => showDone.value ? _doneView() : _installView()),
+      ),
+    );
+  }
+
+  Widget _logo(double size) => Container(
+        width: size,
+        height: size,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [_greenDeep, _green]),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.support_agent_rounded,
+            color: Colors.white, size: size * 0.55),
+      );
+
+  Widget _installView() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 48),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Obx(
-            () => Checkbox(
-              visualDensity: VisualDensity(horizontal: -4, vertical: -4),
-              value: option.value,
-              onChanged: (v) =>
-                  btnEnabled.value ? option.value = !option.value : null,
-            ).marginOnly(right: 8),
+          _logo(88),
+          const SizedBox(height: 22),
+          const Text('ConectDesk',
+              style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xff1A1A2E))),
+          const SizedBox(height: 4),
+          const Text('Suporte remoto',
+              style: TextStyle(fontSize: 14, color: Color(0xff7A7A8C))),
+          const SizedBox(height: 22),
+          const Text(
+            'Clique no botão abaixo para instalar.\nLeva alguns segundos e não precisa configurar nada.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 14, color: Color(0xff4A4A5A), height: 1.4),
           ),
-          Expanded(
-            child: Text(translate(label)),
+          const SizedBox(height: 32),
+          Obx(() => showProgress.value
+              ? Column(children: const [
+                  SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(_green))),
+                  SizedBox(height: 14),
+                  Text('Instalando ConectDesk...',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: _greenDeep)),
+                ])
+              : SizedBox(
+                  width: 280,
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.download_rounded, size: 20),
+                    label: const Text('Instalar ConectDesk',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _green,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: btnEnabled.value ? install : null,
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  Widget _doneView() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 48),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.check_circle_rounded, color: _green, size: 72),
+          const SizedBox(height: 18),
+          const Text('ConectDesk instalado!',
+              style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xff1A1A2E))),
+          const SizedBox(height: 22),
+          Obx(() => myId.value.isEmpty
+              ? const SizedBox.shrink()
+              : Column(children: [
+                  const Text('ID de conexão',
+                      style:
+                          TextStyle(fontSize: 12, color: Color(0xff7A7A8C))),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 10),
+                    decoration: BoxDecoration(
+                        color: const Color(0xffF0FAF5),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: const Color(0xffBDEBD4))),
+                    child: Text(myId.value,
+                        style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.5,
+                            color: _greenDeep)),
+                  ),
+                ])),
+          const SizedBox(height: 24),
+          const Text('Já pode fechar esta janela.',
+              style: TextStyle(fontSize: 14, color: Color(0xff4A4A5A))),
+          const SizedBox(height: 22),
+          SizedBox(
+            width: 180,
+            height: 46,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _greenDeep,
+                side: const BorderSide(color: _green),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => windowManager.close(),
+              child: const Text('Fechar',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
           ),
         ],
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final double em = 13;
-    final isDarkTheme = MyTheme.currentThemeMode() == ThemeMode.dark;
-    return Scaffold(
-        backgroundColor: null,
-        body: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(translate('Installation'),
-                  style: Theme.of(context).textTheme.headlineMedium),
-              Row(
-                children: [
-                  Text('${translate('Installation Path')}:')
-                      .marginOnly(right: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: controller,
-                      readOnly: true,
-                      decoration: InputDecoration(
-                        contentPadding: EdgeInsets.all(0.75 * em),
-                      ),
-                    ).workaroundFreezeLinuxMint().marginOnly(right: 10),
-                  ),
-                  Obx(
-                    () => OutlinedButton.icon(
-                      icon: Icon(Icons.folder_outlined, size: 16),
-                      onPressed: btnEnabled.value ? selectInstallPath : null,
-                      style: buttonStyle,
-                      label: Text(translate('Change Path')),
-                    ),
-                  )
-                ],
-              ).marginSymmetric(vertical: 2 * em),
-              Option(startmenu, label: 'Create start menu shortcuts')
-                  .marginOnly(bottom: 7),
-              Option(desktopicon, label: 'Create desktop icon')
-                  .marginOnly(bottom: 7),
-              Option(printer, label: 'Install {$appName} Printer'),
-              Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDarkTheme
-                        ? Color.fromARGB(135, 87, 87, 90)
-                        : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline_rounded, size: 32)
-                          .marginOnly(right: 16),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(translate('agreement_tip'))
-                              .marginOnly(bottom: em),
-                          InkWell(
-                            hoverColor: Colors.transparent,
-                            onTap: () => launchUrlString(
-                                'https://rustdesk.com/privacy.html'),
-                            child: Tooltip(
-                              message: 'https://rustdesk.com/privacy.html',
-                              child: Row(children: [
-                                Icon(Icons.launch_outlined, size: 16)
-                                    .marginOnly(right: 5),
-                                Text(
-                                  translate('End-user license agreement'),
-                                  style: const TextStyle(
-                                      decoration: TextDecoration.underline),
-                                )
-                              ]),
-                            ),
-                          ),
-                        ],
-                      )
-                    ],
-                  )).marginSymmetric(vertical: 2 * em),
-              Row(
-                children: [
-                  Expanded(
-                    // NOT use Offstage to wrap LinearProgressIndicator
-                    child: Obx(() => showProgress.value
-                        ? LinearProgressIndicator().marginOnly(right: 10)
-                        : Offstage()),
-                  ),
-                  Obx(
-                    () => OutlinedButton.icon(
-                      icon: Icon(Icons.close_rounded, size: 16),
-                      label: Text(translate('Cancel')),
-                      onPressed:
-                          btnEnabled.value ? () => windowManager.close() : null,
-                      style: buttonStyle,
-                    ).marginOnly(right: 10),
-                  ),
-                  Obx(
-                    () => ElevatedButton.icon(
-                      icon: Icon(Icons.done_rounded, size: 16),
-                      label: Text(translate('Accept and Install')),
-                      onPressed: btnEnabled.value ? install : null,
-                      style: buttonStyle,
-                    ),
-                  ),
-                  Offstage(
-                    offstage: bind.installShowRunWithoutInstall(),
-                    child: Obx(
-                      () => OutlinedButton.icon(
-                        icon: Icon(Icons.screen_share_outlined, size: 16),
-                        label: Text(translate('Run without install')),
-                        onPressed: btnEnabled.value
-                            ? () => bind.installRunWithoutInstall()
-                            : null,
-                        style: buttonStyle,
-                      ).marginOnly(left: 10),
-                    ),
-                  ),
-                ],
-              )
-            ],
-          ).paddingSymmetric(horizontal: 4 * em, vertical: 3 * em),
-        ));
-  }
-
-  void install() {
-    do_install() {
-      btnEnabled.value = false;
-      showProgress.value = true;
-      String args = '';
-      if (startmenu.value) args += ' startmenu';
-      if (desktopicon.value) args += ' desktopicon';
-      if (printer.value) args += ' printer';
-      bind.installInstallMe(options: args, path: controller.text);
-    }
-
-    do_install();
-  }
-
-  void selectInstallPath() async {
-    String? install_path = await FilePicker.platform
-        .getDirectoryPath(initialDirectory: controller.text);
-    if (install_path != null) {
-      controller.text = join(install_path, await bind.mainGetAppName());
-    }
+  void install() async {
+    btnEnabled.value = false;
+    showProgress.value = true;
+    // Opções padrão (atalhos), sem expor escolhas ao usuário. Path default.
+    String args = ' startmenu desktopicon';
+    await bind.installInstallMe(options: args, path: controller.text);
+    // Se o processo não foi reiniciado pelo core, mostra a conclusão com o ID.
+    // (Se reiniciar antes, o serviço já ficou instalado de qualquer forma.)
+    try {
+      myId.value = await bind.mainGetMyId();
+    } catch (_) {}
+    showProgress.value = false;
+    showDone.value = true;
   }
 }
