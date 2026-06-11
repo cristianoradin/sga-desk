@@ -189,13 +189,22 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
   }
 
   Widget _sessionBody(String brand) {
-    // 2+ técnicos: layout multi (avatares empilhados + nomes). 1 ou 0: layout single.
-    final multi = _techs.length > 1;
+    // Dedup por nome — várias conexões do MESMO técnico não devem aparecer repetidas
+    // ("cristiano, cristiano, cristiano"). Conta técnicos DISTINTOS.
+    final seen = <String>{};
+    final uniqueTechs = <Map<String, String>>[];
+    for (final t in _techs) {
+      final n = (t['name'] ?? '').trim();
+      if (n.isEmpty) continue;
+      if (seen.add(n.toLowerCase())) uniqueTechs.add(t);
+    }
+    // 2+ técnicos DISTINTOS: layout multi. 1 ou 0: layout single.
+    final multi = uniqueTechs.length > 1;
     final Widget left;
     final Widget info;
     if (multi) {
       // Avatares sobrepostos (até 3 visíveis).
-      final shown = _techs.take(3).toList();
+      final shown = uniqueTechs.take(3).toList();
       left = SizedBox(
         width: 56, height: 56,
         child: Stack(
@@ -209,12 +218,12 @@ class _CdWidgetPageState extends State<CdWidgetPage> with SingleTickerProviderSt
           ],
         ),
       );
-      final names = _techs.map((t) => t['name'] ?? '').where((s) => s.isNotEmpty).join(', ');
+      final names = uniqueTechs.map((t) => t['name'] ?? '').where((s) => s.isNotEmpty).join(', ');
       info = Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${_techs.length} técnicos', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+          Text('${uniqueTechs.length} técnicos', style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
           const SizedBox(height: 2),
           Text(names, style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
           const SizedBox(height: 4),
